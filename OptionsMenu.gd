@@ -17,7 +17,7 @@ const SENS_LADDER: Array = [0.002, 0.01, 0.02, 0.1, 0.2] # index 2 is the recomm
 const DEFAULT_SENS_INDEX: int = 2
 const BUTTON_STATES: Array = ["normal", "hover", "pressed", "hover_pressed"]
 
-enum Mode { LIST, CHANNEL, TWEAK, REPOSITION }
+enum Mode { LIST, CHANNEL, TWEAK, REPOSITION, COLOR_PICKER }
 
 const ANCHOR_DEFS: Dictionary = {
 	"shader_center": {"label": "SHADER POSITION", "channels": ["X", "Y"]},
@@ -47,7 +47,7 @@ const TREE: Dictionary = {
 	# "layout", "icons", "icon_actions" and "menu_orient" are built at runtime by _rows_for() / _title_for()
 }
 
-# Background alpha has no visible effect on a window clear color, so it only gets R, G, B.
+ #Background alpha has no visible effect on a window clear color, so it only gets R, G, B.
 const COLOR_DEFS: Dictionary = {
 	"bg_color": {"label": "BACKGROUND", "channels": ["R", "G", "B"]},
 	"button_color": {"label": "BUTTON", "channels": ["R", "G", "B", "A"]},
@@ -76,7 +76,7 @@ var help # HelpViewer.gd (System Main Menu > HELP)
 
 var layout # ControllerLayout.gd (button grid, orientation, swaps, screen flip, icons)
 var ctx_button: String = "" # the button chosen in the icon list
-
+var picker # ColorPickerOverlay.gd (shared by shader vec4 uniforms and bg_color/button_color)
 
 # =========================================================================
 # SETUP / PERSISTENCE
@@ -93,6 +93,8 @@ func setup(main_manager) -> void:
 	_load_settings()
 	layout = load("res://ControllerLayout.gd").new()
 	layout.setup(main, self) # builds every grid button, incl. the hide-menu one -- must run before _apply_all()
+	picker = load("res://ColorPickerOverlay.gd").new()
+	picker.setup(main, self)
 	_apply_all()
 	lab = load("res://TransitionLab.gd").new()
 	main.add_child(lab) # a Node, so it can run every frame during a transition
@@ -193,30 +195,27 @@ func _apply_buttons() -> void:
 		btn.set_meta("tatool_styled", true)
 
 func _get_channel(key: String, idx: int) -> float:
-	if ANCHOR_DEFS.has(key):
-		return layout.anchor_value(key, idx)
-	var c: Color = settings[key]
-	return c[idx]
+	return layout.anchor_value(key, idx)
 
 func _set_channel(key: String, idx: int, v: float) -> void:
-	if ANCHOR_DEFS.has(key):
-		layout.set_anchor_value(key, idx, v)
-		return
-	var c: Color = settings[key]
-	c[idx] = clampf(snappedf(v, 0.000001), 0.0, 1.0)
-	settings[key] = c
-	custom[key] = true
-	if key == "bg_color":
+	layout.set_anchor_value(key, idx, v)
+	
+	
+func _on_picker_color_changed(c: Color) -> void:
+	settings[active_key] = c
+	custom[active_key] = true
+	if active_key == "bg_color":
 		_apply_background()
 	else:
 		_apply_buttons()
 	_save_settings()
 
+func _on_picker_color_done() -> void:
+	mode = Mode.LIST
+	redraw()
+
 func _default_channel(key: String, idx: int) -> float:
-	if ANCHOR_DEFS.has(key):
-		return layout.anchor_default(key, idx)
-	var default_color: Color = defaults[key]
-	return default_color[idx]
+	return layout.anchor_default(key, idx)
 
 
 func _reset_colors() -> void:
@@ -295,8 +294,8 @@ func handle_vertical(step: int) -> void:
 	if lab != null and lab.menu_active():
 		lab.handle_vertical(step)
 		return
-	if mode == Mode.REPOSITION:
-		return # the grid overlay owns all touches while repositioning
+	if mode == Mode.REPOSITION or mode == Mode.COLOR_PICKER:
+		return
 	match mode:
 		Mode.LIST:
 			var node_id: String = node_stack.back()
@@ -326,6 +325,9 @@ func handle_horizontal(step: int) -> void:
 		elif row["kind"] == "menu_size":
 			layout.cycle_menu_size(step)
 			redraw()
+		elif row["kind"] == "grid_size":
+			layout.cycle_grid_size(step)
+			redraw()
 		return
 	if mode != Mode.TWEAK:
 		return
@@ -344,6 +346,8 @@ func handle_a() -> void:
 		lab.handle_a()
 		return
 	if mode == Mode.REPOSITION:
+		return
+	if mode == Mode.COLOR_PICKER:
 		return
 	match mode:
 		Mode.LIST:
@@ -378,8 +382,8 @@ func handle_a() -> void:
 					layout.rotate_menu()
 				"color":
 					active_key = row["key"]
-					channel_idx = 0
-					mode = Mode.CHANNEL
+					mode = Mode.COLOR_PICKER
+					picker.open(settings[active_key], _on_picker_color_changed, _on_picker_color_done)
 				"anchor":
 					active_key = row["key"]
 					channel_idx = 0
@@ -402,7 +406,7 @@ func handle_b() -> bool:
 		return presets.handle_b()
 	if lab != null and lab.menu_active():
 		return lab.handle_b()
-	if mode == Mode.REPOSITION:
+	if mode == Mode.REPOSITION or mode == Mode.COLOR_PICKER:
 		return false
 	match mode:
 		Mode.TWEAK:
@@ -459,6 +463,7 @@ func _layout_rows() -> Array:
 		{"label": "ROTATE / FLIP MENU  [%s]" % layout.menu_state_text(), "kind": "go", "target": "menu_orient"},
 		{"label": "SHADER SIZE  [%d%%]  ◄ ►" % int(round(layout.shader_size() * 100.0)), "kind": "shader_size"},
 		{"label": "MENU SIZE  [%d%%]  ◄ ►" % int(round(layout.menu_scale() * 100.0)), "kind": "menu_size"},
+		{"label": "GRID SIZE  [%d%%]  ◄ ►" % int(round(layout.grid_scale() * 100.0)), "kind": "grid_size"},		
 		{"label": "MOVE SHADER", "kind": "anchor", "key": "shader_center"},
 		{"label": "MOVE MENU", "kind": "anchor", "key": "menu_center"},
 		{"label": "REPOSITION BUTTONS", "kind": "reposition"},
@@ -505,6 +510,8 @@ func redraw() -> void:
 			_draw_tweak()
 		Mode.REPOSITION:
 			_draw_reposition()
+		Mode.COLOR_PICKER:
+			pass # the picker draws itself in its own overlay; the list underneath stays frozen
 
 func _add_label(text: String, color: Color) -> void:
 	var lbl := Label.new()
@@ -549,26 +556,21 @@ func _draw_reposition() -> void:
 	_add_label(" PRESS AND HOLD EMPTY SPACE TO SLIDE GRID ", Color.WHITE)
 
 func _draw_channels() -> void:
-	var def: Dictionary = _def_for(active_key)
-	var suffix: String = " COLOR" if COLOR_DEFS.has(active_key) else ""
-	_add_label(" ◈ %s%s ◈ SELECT PARAMETER " % [def["label"], suffix], Color.MAGENTA)
-	if COLOR_DEFS.has(active_key):
-		_add_swatch(_opaque_if_background(active_key))
+	var def: Dictionary = ANCHOR_DEFS[active_key]
+	_add_label(" ◈ %s ◈ SELECT PARAMETER " % def["label"], Color.MAGENTA)
 	var names: Array = def["channels"]
 	for i in range(names.size()):
 		var value_text: String = main._fmt(_get_channel(active_key, i))
 		main._add_menu_row("%s   [ %s ]" % [names[i], value_text], i == channel_idx)
 
 func _draw_tweak() -> void:
-	var def: Dictionary = _def_for(active_key)
+	var def: Dictionary = ANCHOR_DEFS[active_key]
 	var names: Array = def["channels"]
 	var value: float = _get_channel(active_key, channel_idx)
 	var default_value: float = _default_channel(active_key, channel_idx)
 	var sens_now: float = SENS_LADDER[sens_idx]
 
 	_add_label(" +═ TWEAK CONSOLE ═+ ", Color.ORANGE)
-	if COLOR_DEFS.has(active_key):
-		_add_swatch(_opaque_if_background(active_key))
 	_add_label(" ║ NAME: %s  ·  %s " % [def["label"], names[channel_idx]], Color.WHITE)
 
 	if tweak_row == 0:

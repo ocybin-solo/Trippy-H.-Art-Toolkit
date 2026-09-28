@@ -32,10 +32,9 @@ const HOLD_FRACTION: float = 0.18 # share of the transition spent holding the pe
 const SENS_DEFAULT_INDEX: int = 2
 const SCREENSAVER_DIR: String = "user://screensaver_presets"
 const NAME_MAX_LENGTH: int = 24
-const SETTINGS_PATH: String = "user://tatool_settings.cfg" # shared with OptionsMenu/ControllerLayout
-const HOLD_TIME_CHOICES: Array = [3.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 30.0]
 
-enum M { FORMULAS, UNIFORMS, CHANNELS, TWEAK, LOAD_LIST, CONFIRM_DELETE }
+
+enum M { FORMULAS, UNIFORMS, CHANNELS, TWEAK, TWEAK_COLOR, LOAD_LIST, CONFIRM_DELETE }
 
 var main
 var owner_menu
@@ -88,10 +87,10 @@ var _name_edit = null
 var _load_entries: Array = []
 var _load_cursor: int = 0
 
-# How long Screensaver Mode holds on a preset before starting the next transition (ScreensaverMode.gd reads this)
-var hold_seconds: float = 6.0
 
 var _re_uniform: RegEx
+
+const _Lib = preload("res://ShaderLibrary.gd")
 
 
 # =========================================================================
@@ -104,7 +103,6 @@ func setup(main_manager, owner_options: Object) -> void:
 	# groups: 1 type, 2 name, 3 hint, 4 default literal, 5 comment tags
 	_re_uniform.compile("^\\s*uniform\\s+(float|vec2|vec4)\\s+(\\w+)\\s*(?::\\s*([^=;]+?))?\\s*=\\s*([^;]+);\\s*(?://(.*))?$")
 	_register_formulas()
-	_load_hold_time()
 	set_process(false)
 
 	_host = main.canvas_container.get_parent()
@@ -591,28 +589,7 @@ func _end_typing() -> void:
 	if was_typing and owner_menu != null:
 		owner_menu.notify_typing_done() # the keyboard may have resized the window; re-check the layout
 
-## Steps through HOLD_TIME_CHOICES and wraps around; saved immediately so it survives a restart.
-func _cycle_hold_time(step: int) -> void:
-	var idx: int = HOLD_TIME_CHOICES.find(hold_seconds)
-	if idx == -1:
-		idx = HOLD_TIME_CHOICES.find(6.0)
-	idx = posmod(idx + step, HOLD_TIME_CHOICES.size())
-	hold_seconds = HOLD_TIME_CHOICES[idx]
-	_save_hold_time()
 
-func _load_hold_time() -> void:
-	var cfg := ConfigFile.new()
-	if cfg.load(SETTINGS_PATH) != OK:
-		return
-	var v: float = float(cfg.get_value("screensaver", "hold_seconds", hold_seconds))
-	if HOLD_TIME_CHOICES.has(v):
-		hold_seconds = v
-
-func _save_hold_time() -> void:
-	var cfg := ConfigFile.new()
-	cfg.load(SETTINGS_PATH)
-	cfg.set_value("screensaver", "hold_seconds", hold_seconds)
-	cfg.save(SETTINGS_PATH)
 
 func _scan_names() -> Array:
 	var out: Array = []
@@ -749,9 +726,11 @@ func _uniforms_of(id: String) -> Array:
 func handle_vertical(step: int) -> void:
 	if saving:
 		return
+	if mode == M.TWEAK_COLOR:
+		return
 	match mode:
 		M.FORMULAS:
-			_cursor_formula = posmod(_cursor_formula + step, _formula_ids().size() + 3)
+			_cursor_formula = posmod(_cursor_formula + step, _formula_ids().size() + 2)
 		M.UNIFORMS:
 			_cursor_uniform = posmod(_cursor_uniform + step, _uniforms_of(_formula_id).size() + 1)
 		M.CHANNELS:
@@ -767,9 +746,7 @@ func handle_vertical(step: int) -> void:
 func handle_horizontal(step: int) -> void:
 	if saving:
 		return
-	if mode == M.FORMULAS and _cursor_formula == _formula_ids().size() + 1:
-		_cycle_hold_time(step)
-		redraw()
+	if mode == M.TWEAK_COLOR:
 		return
 	if mode == M.LOAD_LIST:
 		if not _load_entries.is_empty():
@@ -803,9 +780,6 @@ func handle_a() -> void:
 				# [ LOAD TRANSITION PRESET ]
 				_open_load_list()
 			elif _cursor_formula == ids.size() + 1:
-				# SCREENSAVER HOLD TIME
-				_cycle_hold_time(1)
-			elif _cursor_formula == ids.size() + 2:
 				# [ REMOVE ALL FORMULAS ]
 				active.clear()
 				peak_values.clear()
@@ -819,7 +793,6 @@ func handle_a() -> void:
 				_cursor_uniform = 1
 		M.UNIFORMS:
 			if _cursor_uniform == 0:
-				# [ REMOVE THIS FORMULA ]
 				active.erase(_formula_id)
 				for rec in _uniforms_of(_formula_id):
 					peak_values.erase(rec["name"])
@@ -829,7 +802,9 @@ func handle_a() -> void:
 				_uniform_idx = _cursor_uniform - 1
 				_channel_idx = 0
 				var rec: Dictionary = _uniforms_of(_formula_id)[_uniform_idx]
-				if rec["channels"].size() == 1:
+				if rec["type"] == "vec4":
+					_enter_color_picker(rec)
+				elif rec["channels"].size() == 1:
 					_enter_tweak(rec)
 				else:
 					mode = M.CHANNELS
@@ -837,6 +812,8 @@ func handle_a() -> void:
 			_enter_tweak(_uniforms_of(_formula_id)[_uniform_idx])
 		M.TWEAK:
 			return
+		M.TWEAK_COLOR:
+			return # the picker's own ✕ button is the only way out, by design
 		M.LOAD_LIST:
 			if not _load_entries.is_empty():
 				_load_transition_preset(_load_entries[_load_cursor])
@@ -851,6 +828,23 @@ func handle_a() -> void:
 			_say("DELETED")
 	redraw()
 
+
+## A vec4 uniform is always a color (never animated -- @rest only applies to float), so it skips
+## Channels/Tweak entirely and goes straight to the shared picker, same as a Tier 3 shader color.
+func _enter_color_picker(rec: Dictionary) -> void:
+	mode = M.TWEAK_COLOR
+	var u_name: String = rec["name"]
+	owner_menu.picker.open(peak_values[u_name], func(c: Color) -> void:
+		peak_values[u_name] = c
+		if _material != null:
+			_material.set_shader_parameter(u_name, c)
+	, _on_color_picker_done)
+
+func _on_color_picker_done() -> void:
+	mode = M.UNIFORMS
+	redraw()
+
+
 func _enter_tweak(rec: Dictionary) -> void:
 	_tweak_row = 0
 	_sens_idx = clampi(int(_sens_memory.get(rec["name"], SENS_DEFAULT_INDEX)), 0, 4)
@@ -861,6 +855,8 @@ func handle_b() -> bool:
 	if saving:
 		_end_typing()
 		_close_save_session()
+		return false
+	if mode == M.TWEAK_COLOR:
 		return false
 	match mode:
 		M.TWEAK:
@@ -906,6 +902,8 @@ func redraw() -> void:
 			_draw_channels()
 		M.TWEAK:
 			_draw_tweak()
+		M.TWEAK_COLOR:
+			pass # the picker draws itself in its own overlay; the list underneath stays frozen
 		M.LOAD_LIST:
 			_draw_load_list()
 		M.CONFIRM_DELETE:
@@ -935,13 +933,10 @@ func _draw_formulas() -> void:
 		rows.append(("● " if active.has(id) else "○ ") + String(formulas[id]["name"]))
 	var load_idx: int = rows.size()
 	rows.append("[ LOAD TRANSITION PRESET ]")
-	var hold_idx: int = rows.size()
-	rows.append("SCREENSAVER HOLD TIME  [ %d S ]" % int(hold_seconds))
 	var remove_idx: int = rows.size()
 	rows.append("[ REMOVE ALL FORMULAS ]")
 	_draw_window(rows, _cursor_formula, [load_idx, remove_idx])
-	if _cursor_formula == hold_idx:
-		_add_label(" ◄ ► CHANGE   (USED BY SCREENSAVER MODE) ", Color.DIM_GRAY)
+
 
 func _draw_uniforms() -> void:
 	_add_label(" 🌀 %s " % String(formulas[_formula_id]["name"]), Color.CYAN)
@@ -1046,6 +1041,17 @@ func _register_formulas() -> void:
 	_add_formula("huerotate", "HUE ROTATE", "color", SRC_HUEROTATE)
 	_add_formula("duotone", "DUOTONE OVERRIDE", "color", SRC_DUOTONE)
 	_add_formula("solarize", "SOLARIZE", "color", SRC_SOLARIZE)
+	_add_formula("string_pi", "STRING / PI / WARP", "warp", _Lib.SRC_STRING_PI)
+	_add_formula("complex_inversion", "COMPLEX / INVERSION", "warp", _Lib.SRC_COMPLEX_INVERSION)
+	_add_formula("hyperbolic", "HYPERBOLIC / SINGULARITY", "warp", _Lib.SRC_HYPERBOLIC)
+	_add_formula("tangent_fold", "TANGENT / FOLD", "warp", _Lib.SRC_TANGENT_FOLD)
+	_add_formula("vector_field", "VECTOR FIELD / FLOW", "warp", _Lib.SRC_VECTOR_FIELD)
+	_add_formula("log_spiral", "LOGARITHMIC / SPIRAL", "warp", _Lib.SRC_LOG_SPIRAL)
+	_add_formula("mobius", "MOBIUS / COMPLEX MAP", "warp", _Lib.SRC_MOBIUS)
+	_add_formula("power_warp", "POWER / RADIAL WARP", "warp", _Lib.SRC_POWER_WARP)
+	_add_formula("exponential_warp", "EXPONENTIAL STRETCH", "warp", _Lib.SRC_EXPONENTIAL_WARP)
+
+	
 
 func _add_formula(id: String, display_name: String, kind: String, source: String) -> void:
 	formulas[id] = {"id": id, "name": display_name, "kind": kind, "source": source}
@@ -1066,7 +1072,7 @@ vec2 fx_swirl(vec2 uv) {
 """
 
 const SRC_FISHEYE: String = """
-uniform float u_bulge = 2.5; // @label Bulge Strength | @min -0.4 | @max 6 | @sens 0.1 | @rest 0
+uniform float u_bulge = 2.500; // @label Bulge Strength | @min -6.0 | @max 6 | @sens 0.100 | @rest 0
 uniform vec2 u_center = vec2(0.5, 0.5); // @label Center | @min 0 | @max 1 | @sens 0.01
 
 vec2 fx_fisheye(vec2 uv) {

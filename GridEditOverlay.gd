@@ -38,7 +38,7 @@ var _anchor_drag: String = "" # "" , "shader_center", or "menu_center"
 
 func setup(owner_layout) -> void:
 	layout = owner_layout
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	visible = false
 	set_process(false)
 

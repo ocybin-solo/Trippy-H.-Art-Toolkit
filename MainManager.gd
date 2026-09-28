@@ -119,9 +119,11 @@ func _ready() -> void:
 	load_default_test_shaders()
 	
 	# Cleaned up container constraints for the compact hardware chassis block
+	
 	control_panel.custom_minimum_size = Vector2(0, 240)
 	control_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+	
 
 ## Force-closes whatever menu/overlay is currently open, however deep it is. Wired to the button
 ## that used to toggle the performance readout (see the "vram" button in ControllerLayout.gd) --
@@ -345,7 +347,16 @@ func setup_interface_layer() -> void:
 
 ## Select Pass button is the MENU button which opens or hides the menu system
 func _on_select_pass_button_pressed() -> void:
-	# 🌟 THE ■ OPT TOGGLE: Handles instant entry and complete exit cleanout
+
+		# A peeked menu is neither "open" nor "closed" as far as the toggle logic below is concerned --
+	# it's paused. Any press that would normally open or close something should just reveal it first.
+	if menu_peek_hidden:
+		menu_peek_hidden = false
+		_update_menu_host_visibility()
+		if control_panel.options_menu and control_panel.options_menu.layout:
+			control_panel.options_menu.layout.set_hide_button_icon(false)
+		return
+			# 🌟 THE ■ OPT TOGGLE: Handles instant entry and complete exit cleanout
 	if control_panel.active_state == control_panel.ControlState.HIDDEN:
 		print("■ OPT Tapped: Initializing Overlay Tree -> TIER_1_PASS")
 		control_panel.active_state = control_panel.ControlState.TIER_1_PASS
@@ -469,6 +480,12 @@ func close_select_pass_menu(confirm: bool) -> void:
 # SHADER MENU -- the PWR button / system menu below is unchanged.
 # ------------------------------------------------------------------
 func _on_shader_menu_button_pressed() -> void:
+	if menu_peek_hidden:
+		menu_peek_hidden = false
+		_update_menu_host_visibility()
+		if control_panel.options_menu and control_panel.options_menu.layout:
+			control_panel.options_menu.layout.set_hide_button_icon(false)
+		return
 	# 🌟 THE ⏻ PWR TOGGLE: Master handler for the System Main Menu overlay
 	if control_panel.active_state == control_panel.ControlState.SYSTEM_MENU:
 		print("🟡 Tapped: Direct Escape Cutoff -> Forcing HIDDEN State")
@@ -1025,4 +1042,15 @@ func load_default_test_shaders() -> void:
 		rebuild_pass(p)
 
 	control_panel.uniform_values = pass_values[active_shader_layer]
+	
+## Live-updates one of pass 1's global camera uniforms (pan/zoom/rotation) and mirrors it into
+## pass_values[0], so it's captured correctly if a preset gets saved mid-exploration. Used by the
+## mouse/touch pattern-camera controls.
+func set_pattern_global(u_name: String, value) -> void:
+	pass_values[0][u_name] = value
+	if pass1_material and pass1_material.shader:
+		pass1_material.set_shader_parameter(u_name, value)
+
+func get_pattern_global(u_name: String, fallback):
+	return pass_values[0].get(u_name, fallback)
 	

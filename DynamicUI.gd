@@ -6,12 +6,13 @@ signal uniform_changed(name: String, value: Variant)
 enum ControlState { 
 	HIDDEN, 
 	TIER_1_PASS, 
-	TIER_2_FORMULA,   # New recipe switchboard placeholder layer
-	TIER_3_UNIFORM,   # Old Tier 2 Uniform List
-	TIER_4_PARAMETER, # Old Tier 3 Sub-Channel Axis List
-	TIER_5_TWEAK,     # Old Tier 4 Live Tweak Console Box
+	TIER_2_FORMULA,
+	TIER_3_UNIFORM,
+	TIER_4_PARAMETER,
+	TIER_5_TWEAK,
+	TIER_5_COLOR,     # Tier 5 equivalent for a color uniform: the shared ColorPickerOverlay instead
 	SYSTEM_MENU,
-	HELP_VIEW         # README.md open, scrolling with the D-pad (HelpViewer.gd)
+	HELP_VIEW
 }
 
 var active_state: int = ControlState.HIDDEN
@@ -314,6 +315,28 @@ func enter_tweak_context() -> void:
 	active_state = ControlState.TIER_5_TWEAK
 	main_manager.open_live_tweak_console()
 
+## Enter the shared color picker for the selected uniform (a vec4 flagged is_color) instead of the
+## usual Tier 4/5 channel console. Always returns straight to TIER_3_UNIFORM when done -- colors
+## never visit Tier 4 in either direction.
+func enter_color_picker_context() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if not main_manager or parsed_uniforms.is_empty(): return
+	active_state = ControlState.TIER_5_COLOR
+	var rec: Dictionary = parsed_uniforms[active_index]
+	var current: Color = uniform_values.get(rec["name"], rec["default"])
+	options_menu.picker.open(current, _on_uniform_color_changed, _on_uniform_color_done)
+
+func _on_uniform_color_changed(c: Color) -> void:
+	if parsed_uniforms.is_empty(): return
+	var u_name: String = parsed_uniforms[active_index]["name"]
+	uniform_values[u_name] = c
+	uniform_changed.emit(u_name, c)
+
+func _on_uniform_color_done() -> void:
+	var main_manager = get_tree().get_first_node_in_group("main_manager")
+	if not main_manager: return
+	active_state = ControlState.TIER_3_UNIFORM
+	main_manager.open_fast_travel_menu()
 
 func _on_action_button_b() -> void:
 	# 5-TIER POP BACKWARDS ROUTER
@@ -339,6 +362,9 @@ func _on_action_button_b() -> void:
 		ControlState.HELP_VIEW:
 			if options_menu and options_menu.help:
 				options_menu.help.close_and_return()
+				
+		ControlState.TIER_5_COLOR:
+			return # no B-close: the picker covers every physical button, including this one
 
 		ControlState.TIER_5_TWEAK:
 			# Single-parameter uniforms skipped Tier 4 on the way in, so skip it on the way out too
@@ -484,8 +510,12 @@ func _on_action_button_a() -> void:
 			if parsed_uniforms.is_empty() or last_tier3_index - 1 >= parsed_uniforms.size(): return
 			active_index = last_tier3_index - 1
 			last_tier4_index = 0
+			var rec: Dictionary = parsed_uniforms[active_index]
+			if rec.get("is_color", false):
+				print("🎮 Hierarchy Push: TIER_3_UNIFORM -> TIER_5_COLOR (color picker)")
+				enter_color_picker_context()
 			# A uniform with a single parameter has nothing to choose in Tier 4: jump straight to Tier 5
-			if parsed_uniforms[active_index]["channels"].size() == 1:
+			elif rec["channels"].size() == 1:
 				print("🎮 Hierarchy Push: TIER_3_UNIFORM -> TIER_5_TWEAK (single parameter)")
 				enter_tweak_context()
 			else:
@@ -499,6 +529,8 @@ func _on_action_button_a() -> void:
 
 		ControlState.TIER_5_TWEAK:
 			return
+		ControlState.TIER_5_COLOR:
+			return # the picker's own ✕ button is the only way out, by design
 
 # FUNCTION END: _on_action_button_a
 

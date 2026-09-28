@@ -12,6 +12,7 @@ extends RefCounted
 ##             uniform currently equals N. Comma-separate several: "@style 0,2". No @style tag = always shown.
 ##   @is_style marks an int uniform as the one Tier 3 reads to decide which @style N group is visible.
 ##             One per recipe; give it real names via @label, e.g. "0=Ramp,1=Cosine,2=Chrono,3=Cyber".
+##	 @raw      If a shader parameter is vec4 for some reason and IS NOT a color, then use this tag at the end
 ##
 ## RECIPE CONVENTIONS (function must be named fx_<id>; helper functions should start with <id>_):
 ##   Pass 1 (pattern):  vec4 fx_<id>(vec2 uv)   single-select
@@ -143,20 +144,20 @@ func _pass_header(pass_index: int) -> String:
 func _template_globals(pass_index: int) -> String:
 	match pass_index:
 		PASS_PATTERN:
-			var g1: String = "uniform float u_global_zoom = 1.0; // @label Master Pattern Scale | @min 0.2 | @max 5.0 | @sens 0.05 | @global\n"
+			var g1: String = "uniform float u_global_zoom = 1.0; // @label Master Pattern Scale | @min 0.002 | @max 20.0 | @sens 0.05 | @global\n"
 			g1 += "uniform vec2 u_global_offset = vec2(0.0, 0.0); // @label Master Pan | @min -2.0 | @max 2.0 | @sens 0.01 | @global\n"
-			g1 += "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global"
-			g1 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global"
+			g1 += "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global\n"
+			g1 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global\n"
 			return g1
 		PASS_WARP:
 			var g2: String = "uniform float u_warp_master_mix = 1.0; // @label Warp Dry/Wet Mix | @min 0.0 | @max 1.0 | @sens 0.01 | @global\n"
-			g2 += "uniform float u_global_speed_mod = 1.0; // @label Master Animation Speed | @min 0.0 | @max 3.0 | @sens 0.05 | @global"
-			g2 += "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global"
+			g2 += "uniform float u_global_speed_mod = 1.0; // @label ?? Does nothing ?? | @min 0.0 | @max 3.0 | @sens 0.05 | @global\n"
+			g2 += "uniform float u_rotation_speed = 0.0; // @label Rotation Effects | @min -2 | @max 2 | @sens 0.05 | @global\n"
 			return g2
 		PASS_FILTER:
 			var g3: String = "uniform float u_master_brightness = 1.0; // @label Master Brightness | @min 0.5 | @max 2.0 | @sens 0.02 | @global\n"
 			g3 += "uniform float u_master_saturation = 1.0; // @label Master Saturation | @min 0.0 | @max 2.0 | @sens 0.02 | @global\n"
-			g3 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global"
+			g3 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global\n"
 			return g3
 	return ""
 
@@ -165,9 +166,10 @@ func _pass_fragment(pass_index: int, ids: Array) -> String:
 	match pass_index:
 		PASS_PATTERN:
 			f += "void fragment() {\n"
+			f += "\tfloat ang = u_time * u_rotation_speed + u_master_rotation;\n"
 			f += "\t// Apply universal Pan and Zoom globals to space first\n"
 			f += "\tvec2 uv = (UV - 0.5) * u_global_zoom + u_global_offset;\n"
-			f += "\tfloat ang = u_time * u_rotation_speed;\n"
+			#f += "\tfloat ang = u_time * u_rotation_speed;\n"
 			f += "\tuv = vec2(cos(ang) * uv.x - sin(ang) * uv.y, sin(ang) * uv.x + cos(ang) * uv.y) + 0.5;\n"
 			if ids.is_empty():
 				f += "\tCOLOR = vec4(0.0, 0.0, 0.0, 1.0);\n"
@@ -254,22 +256,24 @@ func _parse_uniform_line(line: String, recipe_id: String) -> Dictionary:
 	elif not is_inf(mn) and not is_inf(mx):
 		sens = (mx - mn) / 100.0
 
+	var is_color: bool = type == "vec4" and not tags.has("raw")
+
 	var channels: PackedStringArray = PackedStringArray(["VALUE"])
 	if type == "vec2":
 		channels = PackedStringArray(["X", "Y"])
 	elif type == "vec3":
 		channels = PackedStringArray(["X", "Y", "Z"])
 	elif type == "vec4":
-		channels = PackedStringArray(["R", "G", "B", "A"])
+		channels = PackedStringArray(["R", "G", "B", "A"]) if is_color else PackedStringArray(["X", "Y", "Z", "W"])
 	if tags.has("channels"):
 		channels = PackedStringArray()
 		for c in String(tags["channels"]).split(","):
 			channels.append(c.strip_edges())
 
 	return {
-		"recipe": recipe_id,        # "" = owned by the pass itself
-		"base_name": base,          # name as written in the recipe
-		"name": base,               # final name in the assembled shader (prefixed unless global)
+		"recipe": recipe_id,
+		"base_name": base,
+		"name": base,
 		"type": type,
 		"hint": m.get_string(3).strip_edges(),
 		"literal": literal,
@@ -277,11 +281,12 @@ func _parse_uniform_line(line: String, recipe_id: String) -> Dictionary:
 		"label": str(tags.get("label", base.trim_prefix("u_").replace("_", " ").capitalize())),
 		"min": mn,
 		"max": mx,
-		"sens": sens,               # recommended sensitivity
+		"sens": sens,
 		"channels": channels,
 		"is_global": tags.has("global"),
 		"is_style": tags.has("is_style"),
-		"styles": _parse_styles(tags),   # empty Array = shown for every style (or not style-gated at all)
+		"is_color": is_color,   # vec4 that opens the shared color picker instead of Tier 4/5
+		"styles": _parse_styles(tags),
 	}
 
 
@@ -462,7 +467,7 @@ func _register_builtin_recipes() -> void:
 	_register("fbm_master", PASS_PATTERN, "FBM", SRC_FBM_MASTER, false)
 	_register("cyber_veins", PASS_PATTERN, "GYROID", SRC_CYBER_VEINS, false)
 	_register("plasma_master", PASS_PATTERN, "PLASMAS", SRC_PLASMA_MASTER, false)    
-	_register("fractal_master", PASS_PATTERN, "FRACTALS", SRC_FRACTAL_MASTER, false)
+	_register("fractal_unfolding", PASS_PATTERN, "FRACTALS", SRC_FRACTAL_UNFOLDING, false)
 	_register("truchet_master", PASS_PATTERN, "TRUCHETS", SRC_TRUCHET_MASTER, false)
 	_register("spiro_master", PASS_PATTERN, "KALEIDOSCOPES", SRC_SPIRO_MASTER, false)
 	#shaders I had some part in actually designing...
@@ -471,6 +476,14 @@ func _register_builtin_recipes() -> void:
 	_register("fluid_glitch_v2",PASS_PATTERN,"WEIRD ART PIECE",SRC_FLUID_GLITCH_V2, false)
 	_register("golden_fabric", PASS_PATTERN, "FABRIC ORBS", SRC_GOLDEN_FABRIC, false)
 	_register("constructed_star", PASS_PATTERN, "STAR GEOMETRY", SRC_CONSTRUCTED_STAR, false)
+	_register("fractal_6d", PASS_PATTERN, "FRACTAL / 6D Z-C-X SPACE", SRC_FRACTAL_6D, false)
+	_register("complex_log_lab", PASS_PATTERN, "MATH LAB / COMPLEX LOG", SRC_COMPLEX_LOG_LAB, false)
+	_register("complex_tangent", PASS_PATTERN, "MATH LAB / COMPLEX TANGENT", SRC_COMPLEX_TANGENT, false)
+	_register("complex_mobius", PASS_PATTERN, "MATH LAB / COMPLEX MOBIUS", SRC_COMPLEX_MOBIUS, false)
+	_register("complex_power", PASS_PATTERN, "MATH LAB / COMPLEX POWER", SRC_COMPLEX_POWER_LAB, false)
+	_register("complex_self_power", PASS_PATTERN, "MATH LAB / COMPLEX SELF-POWER", SRC_COMPLEX_SELF_POWER, false)
+	_register("reciprocal_feedback", PASS_PATTERN, "MATH LAB / RECIPROCAL FEEDBACK", SRC_RECIPROCAL_FEEDBACK, false)
+	_register("quaternion_lab", PASS_PATTERN, "MATH LAB / QUATERNION SPACE", SRC_QUATERNION_LAB, false)
 	
 	
 	#######  PASS 2 ########### (Warp Modules) - This Pass alone lets you add more than one at a time!
@@ -511,10 +524,887 @@ func _register_builtin_recipes() -> void:
 
 
 
+const SRC_QUATERNION_LAB: String = """
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 20.0 | @sens 0.02
+uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_q_z = 0.0; // @label Q Z Slice | @min -50.0 | @max 50.0 | @sens 0.01
+uniform float u_q_w = 0.0; // @label Q W Slice | @min -50.0 | @max 50.0 | @sens 0.01
+uniform float u_q_motion_z = 0.0; // @label Z Slice Motion | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_q_motion_w = 0.0; // @label W Slice Motion | @min -10.0 | @max 10.0 | @sens 0.01
+
+uniform float u_c_x = 0.0; // @label C X | @min -50.0 | @max 50.0 | @sens 0.01
+uniform float u_c_y = 0.0; // @label C Y | @min -50.0 | @max 50.0 | @sens 0.01
+uniform float u_c_z = 0.0; // @label C Z | @min -50.0 | @max 50.0 | @sens 0.01
+uniform float u_c_w = 0.0; // @label C W | @min -50.0 | @max 50.0 | @sens 0.01
+
+uniform float u_c_motion_x = 0.0; // @label C X Motion | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_c_motion_y = 0.0; // @label C Y Motion | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_c_motion_z = 0.0; // @label C Z Motion | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_c_motion_w = 0.0; // @label C W Motion | @min -10.0 | @max 10.0 | @sens 0.01
+
+uniform float u_strength = 1.0; // @label Quaternion Strength | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 10.0 | @sens 0.01
+uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
+
+uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
+
+uniform vec3 u_color_1 = vec3(0.02,0.0,0.08); // @label Color 1
+uniform vec3 u_color_2 = vec3(0.0,0.3,1.0); // @label Color 2
+uniform vec3 u_color_3 = vec3(1.0,0.1,0.7); // @label Color 3
+uniform vec3 u_color_4 = vec3(1.0,0.8,0.1); // @label Color 4
+
+vec4 quat_mul(vec4 a, vec4 b) {
+    return vec4(
+        a.x*b.x-a.y*b.y-a.z*b.z-a.w*b.w,
+        a.x*b.y+a.y*b.x+a.z*b.w-a.w*b.z,
+        a.x*b.z-a.y*b.w+a.z*b.x+a.w*b.y,
+        a.x*b.w+a.y*b.z-a.z*b.y+a.w*b.x
+    );
+}
+
+vec4 quat_square(vec4 q) {
+    return quat_mul(q,q);
+}
+
+vec3 quat_palette(float x) {
+    x = fract(x);
+    if (x < 0.3333) return mix(u_color_1,u_color_2,x*3.0);
+    if (x < 0.6666) return mix(u_color_2,u_color_3,(x-0.3333)*3.0);
+    return mix(u_color_3,u_color_4,(x-0.6666)*3.0);
+}
+
+vec4 fx_quaternion_lab(vec2 uv) {
+    vec2 p = (uv-vec2(0.5))*u_zoom+vec2(u_pan_x,u_pan_y);
+    float t = u_time;
+
+    vec4 q = vec4(
+        p.x,
+        p.y,
+        u_q_z+t*u_q_motion_z,
+        u_q_w+t*u_q_motion_w
+    );
+
+    vec4 c = vec4(
+        u_c_x+t*u_c_motion_x,
+        u_c_y+t*u_c_motion_y,
+        u_c_z+t*u_c_motion_z,
+        u_c_w+t*u_c_motion_w
+    );
+
+    float orbit = 0.0;
+    float magnitude = 0.0;
+    float field = 0.0;
+
+    for (int i=0;i<60;i++) {
+        if (float(i)>=u_iterations) break;
+
+        vec4 next = quat_square(q)*u_strength+c;
+        q = mix(q,next,u_feedback);
+        magnitude = dot(q,q);
+        orbit += 1.0;
+
+        if (magnitude>u_escape*u_escape) break;
+    }
+
+    if (u_color_field<0.5)
+        field = orbit/u_iterations;
+    else if (u_color_field<1.5)
+        field = sqrt(magnitude)*u_color_scale;
+    else if (u_color_field<2.5)
+        field = atan(q.y,q.x)/6.28318*u_color_scale;
+    else if (u_color_field<3.5)
+        field = q.z*u_color_scale;
+    else
+        field = q.w*u_color_scale;
+
+    field += u_color_cycle*t;
+    vec3 col = quat_palette(field);
+    float glow = 1.0/(1.0+0.15*sqrt(magnitude));
+
+    return vec4(col*glow,1.0);
+}
+"""
+
+
+const SRC_RECIPROCAL_FEEDBACK: String = """
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 20.0 | @sens 0.01
+uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_alpha_real = 0.35; // @label Alpha Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_alpha_imag = 0.0; // @label Alpha Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+
+uniform float u_c_real = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_imag = 0.0; // @label C Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_motion_x = 0.0; // @label C Motion Real | @min -20.0 | @max 20.0 | @sens 0.01
+uniform float u_c_motion_y = 0.0; // @label C Motion Imaginary | @min -20.0 | @max 20.0 | @sens 0.01
+
+uniform float u_reciprocal_strength = 1.0; // @label Reciprocal Strength | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 10.0 | @sens 0.01
+uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
+
+uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
+
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.01,0.08,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.05,0.30,1.0,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.95,0.05,0.60,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.70,0.03,1.0);
+
+vec2 cmul_recip(vec2 a, vec2 b) {
+    return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);
+}
+
+vec2 cdiv_recip(vec2 a, vec2 b) {
+    float d = max(dot(b,b),0.000001);
+    return vec2(
+        (a.x*b.x+a.y*b.y)/d,
+        (a.y*b.x-a.x*b.y)/d
+    );
+}
+
+vec3 palette_recip(float x) {
+    x = fract(x);
+    if (x < 0.3333) return mix(u_color_1.rgb,u_color_2.rgb,smoothstep(0.0,0.3333,x));
+    if (x < 0.6666) return mix(u_color_2.rgb,u_color_3.rgb,smoothstep(0.3333,0.6666,x));
+    return mix(u_color_3.rgb,u_color_4.rgb,smoothstep(0.6666,1.0,x));
+}
+
+vec3 bipolar_recip(float x) {
+    float a = clamp(abs(x)*u_color_scale,0.0,1.0);
+    float side = x < 0.0 ? 0.0 : 1.0;
+    vec3 neg = mix(u_color_1.rgb,u_color_3.rgb,a);
+    vec3 pos = mix(u_color_2.rgb,u_color_4.rgb,a);
+    return mix(neg,pos,side);
+}
+
+vec4 fx_reciprocal_feedback(vec2 uv) {
+    vec2 z = (uv-vec2(0.5))*u_zoom+vec2(u_pan_x,u_pan_y);
+
+    vec2 alpha = vec2(u_alpha_real,u_alpha_imag);
+
+    vec2 c = vec2(
+        u_c_real+u_time*u_c_motion_x,
+        u_c_imag+u_time*u_c_motion_y
+    );
+
+    float iter = 0.0;
+
+    for (int i=0;i<60;i++) {
+        if (float(i)>=u_iterations) break;
+
+        vec2 reciprocal = cdiv_recip(alpha,z);
+        vec2 next = z+reciprocal*u_reciprocal_strength+c;
+
+        z = mix(z,next,u_feedback);
+        iter += 1.0;
+
+        if (dot(z,z)>u_escape*u_escape) break;
+    }
+
+    float mag = length(z);
+    float phase = atan(z.y,z.x);
+
+    vec3 col;
+
+    if (u_color_field < 0.5) {
+        // 0: Iteration structure
+        float v = iter/max(u_iterations,1.0);
+        col = palette_recip(v*u_color_scale+u_time*u_color_cycle);
+    } else if (u_color_field < 1.5) {
+        // 1: Magnitude shells
+        float v = log(1.0+mag)*u_color_scale;
+        col = palette_recip(v+u_time*u_color_cycle);
+    } else if (u_color_field < 2.5) {
+        // 2: Phase wheel
+        float v = phase/6.2831853+0.5;
+        col = palette_recip(v*u_color_scale+u_time*u_color_cycle);
+    } else if (u_color_field < 3.5) {
+        // 3: Real bipolar field
+        col = bipolar_recip(z.x);
+    } else {
+        // 4: Imaginary bipolar field
+        col = bipolar_recip(z.y);
+    }
+
+    float core = exp(-8.0*mag);
+    col += core*0.25;
+
+    return vec4(col,1.0);
+}
+"""
+
+const SRC_COMPLEX_SELF_POWER: String = """
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 200.0 | @sens 0.01
+uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_c_real = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_imag = 0.0; // @label C Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_motion_x = 0.0; // @label C Motion Real | @min -20.0 | @max 20.0 | @sens 0.01
+uniform float u_c_motion_y = 0.0; // @label C Motion Imaginary | @min -20.0 | @max 20.0 | @sens 0.01
+
+uniform float u_power_strength = 1.0; // @label Self Power Strength | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 13.0 | @sens 0.01
+uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
+
+uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
+
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.01,0.08,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.05,0.30,1.0,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.95,0.05,0.60,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.70,0.03,1.0);
+
+vec2 cmul_self(vec2 a, vec2 b) {
+    return vec2(a.x*b.x-a.y*b.y, a.x*b.y+a.y*b.x);
+}
+
+vec2 clog_self(vec2 z) {
+    float r = max(length(z),0.000001);
+    return vec2(log(r),atan(z.y,z.x));
+}
+
+vec2 cexp_self(vec2 z) {
+    float e = clamp(z.x,-20.0,20.0);
+    float q = exp(e);
+    return q*vec2(cos(z.y),sin(z.y));
+}
+
+vec2 cpow_self(vec2 z) {
+    return cexp_self(cmul_self(z,clog_self(z)));
+}
+
+vec3 palette_self(float x) {
+    x = fract(x);
+    if (x < 0.3333) return mix(u_color_1.rgb,u_color_2.rgb,smoothstep(0.0,0.3333,x));
+    if (x < 0.6666) return mix(u_color_2.rgb,u_color_3.rgb,smoothstep(0.3333,0.6666,x));
+    return mix(u_color_3.rgb,u_color_4.rgb,smoothstep(0.6666,1.0,x));
+}
+
+vec3 bipolar_self(float x) {
+    float a = clamp(abs(x)*u_color_scale,0.0,1.0);
+    float side = x < 0.0 ? 0.0 : 1.0;
+    vec3 neg = mix(u_color_1.rgb,u_color_3.rgb,a);
+    vec3 pos = mix(u_color_2.rgb,u_color_4.rgb,a);
+    return mix(neg,pos,side);
+}
+
+vec4 fx_complex_self_power(vec2 uv) {
+    vec2 z = (uv-vec2(0.5))*u_zoom+vec2(u_pan_x,u_pan_y);
+
+    vec2 c = vec2(
+        u_c_real+u_time*u_c_motion_x,
+        u_c_imag+u_time*u_c_motion_y
+    );
+
+    float iter = 0.0;
+
+    for (int i=0;i<60;i++) {
+        if (float(i)>=u_iterations) break;
+
+        vec2 next = cpow_self(z)*u_power_strength+c;
+        z = mix(z,next,u_feedback);
+        iter += 1.0;
+
+        if (dot(z,z)>u_escape*u_escape) break;
+    }
+
+    float mag = length(z);
+    float phase = atan(z.y,z.x);
+
+    vec3 col;
+
+    if (u_color_field < 0.5) {
+        // 0: Iteration structure
+        float v = iter/max(u_iterations,1.0);
+        col = palette_self(v*u_color_scale+u_time*u_color_cycle);
+    } else if (u_color_field < 1.5) {
+        // 1: Magnitude shells
+        float v = log(1.0+mag)*u_color_scale;
+        col = palette_self(v+u_time*u_color_cycle);
+    } else if (u_color_field < 2.5) {
+        // 2: Phase wheel
+        float v = phase/6.2831853+0.5;
+        col = palette_self(v*u_color_scale+u_time*u_color_cycle);
+    } else if (u_color_field < 3.5) {
+        // 3: Real bipolar field
+        col = bipolar_self(z.x);
+    } else {
+        // 4: Imaginary bipolar field
+        col = bipolar_self(z.y);
+    }
+
+    float glow = 1.0-exp(-0.035*mag);
+    col += glow*0.12;
+
+    return vec4(col,1.0);
+}
+"""
+
+
+const SRC_COMPLEX_POWER_LAB: String = """
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 200.0 | @sens 0.01
+uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_x_real = 2.0; // @label X Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_x_imag = 0.0; // @label X Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_x_motion_x = 0.0; // @label X Motion Real | @min -20.0 | @max 20.0 | @sens 0.01
+uniform float u_x_motion_y = 0.0; // @label X Motion Imaginary | @min -20.0 | @max 20.0 | @sens 0.01
+
+uniform float u_c_real = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_imag = 0.0; // @label C Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_motion_x = 0.0; // @label C Motion Real | @min -20.0 | @max 20.0 | @sens 0.01
+uniform float u_c_motion_y = 0.0; // @label C Motion Imaginary | @min -20.0 | @max 20.0 | @sens 0.01
+
+uniform float u_power_strength = 1.0; // @label Power Strength | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 13.0 | @sens 0.01
+uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
+
+uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
+
+uniform vec4 u_color_1 : source_color = vec4(0.03,0.01,0.10,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.10,0.25,0.95,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.95,0.10,0.65,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.75,0.05,1.0);
+
+vec2 cmul_power(vec2 a, vec2 b) {
+    return vec2(a.x*b.x-a.y*b.y, a.x*b.y+a.y*b.x);
+}
+
+vec2 clog_power(vec2 z) {
+    float r = max(length(z), 0.000001);
+    return vec2(log(r), atan(z.y,z.x));
+}
+
+vec2 cexp_power(vec2 z) {
+    float e = clamp(z.x,-20.0,20.0);
+    float q = exp(e);
+    return q * vec2(cos(z.y),sin(z.y));
+}
+
+vec2 cpow_power(vec2 z, vec2 p) {
+    vec2 l = clog_power(z);
+    return cexp_power(cmul_power(p,l));
+}
+
+vec3 palette_power(float x) {
+    x = fract(x);
+    if (x < 0.3333) return mix(u_color_1.rgb,u_color_2.rgb,smoothstep(0.0,0.3333,x));
+    if (x < 0.6666) return mix(u_color_2.rgb,u_color_3.rgb,smoothstep(0.3333,0.6666,x));
+    return mix(u_color_3.rgb,u_color_4.rgb,smoothstep(0.6666,1.0,x));
+}
+
+vec3 bipolar_power(float x) {
+    float a = clamp(abs(x)*u_color_scale,0.0,1.0);
+    float side = x < 0.0 ? 0.0 : 1.0;
+    vec3 neg = mix(u_color_1.rgb,u_color_3.rgb,a);
+    vec3 pos = mix(u_color_2.rgb,u_color_4.rgb,a);
+    return mix(neg,pos,side);
+}
+
+vec4 fx_complex_power(vec2 uv) {
+    vec2 p = (uv-vec2(0.5))*u_zoom + vec2(u_pan_x,u_pan_y);
+
+    vec2 x = vec2(
+        u_x_real + u_time*u_x_motion_x,
+        u_x_imag + u_time*u_x_motion_y
+    );
+
+    vec2 c = vec2(
+        u_c_real + u_time*u_c_motion_x,
+        u_c_imag + u_time*u_c_motion_y
+    );
+
+    vec2 z = p;
+    float iter = 0.0;
+
+    for (int i=0;i<60;i++) {
+        if (float(i)>=u_iterations) break;
+
+        vec2 next = cpow_power(z,x)*u_power_strength+c;
+        z = mix(z,next,u_feedback);
+        iter += 1.0;
+
+        if (dot(z,z)>u_escape*u_escape) break;
+    }
+
+    float mag = length(z);
+    float phase = atan(z.y,z.x);
+
+    vec3 col;
+
+    if (u_color_field < 0.5) {
+        // 0: Iteration bands
+        float v = iter/max(u_iterations,1.0);
+        col = palette_power(v*u_color_scale+u_time*u_color_cycle);
+    } else if (u_color_field < 1.5) {
+        // 1: Magnitude shells
+        float v = log(1.0+mag)*u_color_scale;
+        col = palette_power(v+u_time*u_color_cycle);
+    } else if (u_color_field < 2.5) {
+        // 2: Phase wheel
+        float v = phase/6.2831853+0.5;
+        col = palette_power(v*u_color_scale+u_time*u_color_cycle);
+    } else if (u_color_field < 3.5) {
+        // 3: Real-axis bipolar field
+        col = bipolar_power(z.x);
+    } else {
+        // 4: Imaginary-axis bipolar field
+        col = bipolar_power(z.y);
+    }
+
+    float glow = 1.0-exp(-0.035*mag);
+    col += glow*0.12;
+
+    return vec4(col,1.0);
+}
+"""
+
+
+
+const SRC_COMPLEX_MOBIUS: String= """
+
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 200.0 | @sens 0.02
+uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_a_x = 1.0; // @label A Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_a_y = 0.0; // @label A Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_b_x = 0.0; // @label B Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_b_y = 0.0; // @label B Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_x = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_y = 0.0; // @label C Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_d_x = 1.0; // @label D Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_d_y = 0.0; // @label D Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
+
+uniform float u_strength = 1.0; // @label Transform Strength | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 13.0 | @sens 0.01
+uniform float u_iterations = 8.0; // @label Iterations | @min 1.0 | @max 40.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
+
+uniform float u_color_mode = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0 | @is_style
+// @style 0 = Iteration
+// @style 1 = Magnitude
+// @style 2 = Phase
+// @style 3 = Real
+// @style 4 = Imaginary
+
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
+
+uniform vec4 u_color_1 : source_color = vec4(0.01,0.01,0.06,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.05,0.35,1.0,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.95,0.05,0.55,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.75,0.10,1.0);
+
+vec2 cmul_mob(vec2 a,vec2 b) {
+    return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);
+}
+
+vec2 cdiv_mob(vec2 a,vec2 b) {
+    float d=dot(b,b)+0.000001;
+    return vec2(a.x*b.x+a.y*b.y,a.y*b.x-a.x*b.y)/d;
+}
+
+vec2 mobius_mob(vec2 z,vec2 a,vec2 b,vec2 c,vec2 d) {
+    return cdiv_mob(cmul_mob(a,z)+b,cmul_mob(c,z)+d);
+}
+
+vec3 mobius_palette(float x) {
+    x=fract(x);
+    if(x<0.25) return mix(u_color_1.rgb,u_color_2.rgb,x*4.0);
+    if(x<0.50) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.25)*4.0);
+    if(x<0.75) return mix(u_color_3.rgb,u_color_4.rgb,(x-0.50)*4.0);
+    return mix(u_color_4.rgb,u_color_1.rgb,(x-0.75)*4.0);
+}
+
+vec4 fx_complex_mobius(vec2 uv) {
+    vec2 z=(uv-vec2(0.5))*2.0/u_zoom+vec2(u_pan_x,u_pan_y);
+
+    vec2 a=vec2(u_a_x,u_a_y);
+    vec2 b=vec2(u_b_x,u_b_y);
+    vec2 c=vec2(u_c_x,u_c_y);
+    vec2 d=vec2(u_d_x,u_d_y);
+
+    float n=0.0;
+
+    for(int i=0;i<40;i++) {
+        if(float(i)>=u_iterations) break;
+
+        vec2 next=mobius_mob(z,a,b,c,d);
+        z=mix(z,next,u_feedback*u_strength);
+        n+=1.0;
+
+        if(length(z)>u_escape) break;
+    }
+
+    float field;
+
+    if(u_color_mode<0.5)
+        field=n/u_iterations;
+    else if(u_color_mode<1.5)
+        field=log(1.0+length(z));
+    else if(u_color_mode<2.5)
+        field=(atan(z.y,z.x)+3.14159265)/6.2831853;
+    else if(u_color_mode<3.5)
+        field=abs(z.x);
+    else
+        field=abs(z.y);
+
+    field=field*u_color_scale+u_time*u_color_cycle;
+
+    return vec4(mobius_palette(field),1.0);
+}
+"""
+
+
+
+
+
+const SRC_COMPLEX_TANGENT: String ="""
+uniform float u_zoom = 1.5; // @label Zoom | @min 0.002 | @max 80.000 | @sens 0.020
+uniform float u_pan_x = 0.0; // @label Pan X | @min -040.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_c_x = 0.0; // @label C Real | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_c_y = 0.0; // @label C Imaginary | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_c_motion_x = 0.0; // @label C Motion X | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_c_motion_y = 0.0; // @label C Motion Y | @min -10.0 | @max 10.0 | @sens 0.01
+
+uniform float u_tan_strength = 1.0; // @label Tangent Strength | @min 0.05 | @max 40.0 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 14.0 | @sens 0.01
+uniform float u_iterations = 18.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 20.0; // @label Escape | @min 2.0 | @max 100.0 | @sens 1.0
+
+uniform float u_color_mode = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0 | @is_style
+// @style 0 = Iteration
+// @style 1 = Magnitude
+// @style 2 = Phase
+// @style 3 = Real
+// @style 4 = Imaginary
+
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 8.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -2.0 | @max 2.0 | @sens 0.01
+
+uniform vec4 u_color_1 : source_color = vec4(0.01,0.01,0.06,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.10,0.25,0.95,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.90,0.05,0.55,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.75,0.10,1.0);
+
+vec2 cdiv_tan(vec2 a,vec2 b) {
+    float d=dot(b,b)+0.000001;
+    return vec2(a.x*b.x+a.y*b.y,a.y*b.x-a.x*b.y)/d;
+}
+
+vec2 csin_tan(vec2 z) {
+    return vec2(sin(z.x)*cosh(z.y),cos(z.x)*sinh(z.y));
+}
+
+vec2 ccos_tan(vec2 z) {
+    return vec2(cos(z.x)*cosh(z.y),-sin(z.x)*sinh(z.y));
+}
+
+vec2 ctan_tan(vec2 z) {
+    return cdiv_tan(csin_tan(z),ccos_tan(z));
+}
+
+vec3 tan_palette(float x) {
+    x=fract(x);
+    if(x<0.25) return mix(u_color_1.rgb,u_color_2.rgb,x*4.0);
+    if(x<0.50) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.25)*4.0);
+    if(x<0.75) return mix(u_color_3.rgb,u_color_4.rgb,(x-0.50)*4.0);
+    return mix(u_color_4.rgb,u_color_1.rgb,(x-0.75)*4.0);
+}
+
+vec4 fx_complex_tangent(vec2 uv) {
+    vec2 z=(uv-vec2(0.5))*2.0/u_zoom+vec2(u_pan_x,u_pan_y);
+    vec2 c=vec2(u_c_x,u_c_y)+vec2(u_c_motion_x,u_c_motion_y)*u_time;
+
+    float n=0.0;
+
+    for(int i=0;i<60;i++) {
+        if(float(i)>=u_iterations) break;
+
+        vec2 next=ctan_tan(z)*u_tan_strength+c;
+        z=mix(z,next,u_feedback);
+        n+=1.0;
+
+        if(length(z)>u_escape) break;
+    }
+
+    float field;
+
+    if(u_color_mode<0.5)
+        field=n/u_iterations;
+    else if(u_color_mode<1.5)
+        field=log(1.0+length(z));
+    else if(u_color_mode<2.5)
+        field=(atan(z.y,z.x)+3.14159265)/6.2831853;
+    else if(u_color_mode<3.5)
+        field=abs(z.x);
+    else
+        field=abs(z.y);
+
+    field=field*u_color_scale+u_time*u_color_cycle;
+
+    return vec4(tan_palette(field),1.0);
+}
+"""
+
+
+
+const SRC_COMPLEX_LOG_LAB: String = """
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 80.0 | @sens 0.02
+uniform float u_pan_x = 0.0; // @label Pan X | @min -300.0 | @max 300.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -300.0 | @max 300.0 | @sens 0.01
+
+uniform float u_c_x = 0.0; // @label C Real | @min -130.0 | @max 130.0 | @sens 0.01
+uniform float u_c_y = 0.0; // @label C Imaginary | @min -130.0 | @max 130.0 | @sens 0.01
+uniform float u_c_motion_x = 0.0; // @label C Motion X | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_motion_y = 0.0; // @label C Motion Y | @min -100.0 | @max 100.0 | @sens 0.01
+
+uniform float u_log_scale = 1.0; // @label Log Strength | @min 0.001 | @max 13.00 | @sens 0.01
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 20.00 | @sens 0.01
+uniform float u_iterations = 24.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 20.0; // @label Escape | @min 2.0 | @max 100.0 | @sens 1.0
+
+uniform float u_color_mode = 0.0; // @label Color Field (0=Iteration, 1=Magnitude, 2=Phase, 3=Real, 4=Imaginary) | @min 0.0 | @max 4.0 | @sens 1.0 | @is_style
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 8.0 | @sens 0.01
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -2.0 | @max 2.0 | @sens 0.01
+
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.01,0.08,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.05,0.30,0.90,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.90,0.10,0.60,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.80,0.15,1.0);
+
+vec2 clog_lab(vec2 z) {
+    float r=max(length(z),0.00001);
+    return vec2(log(r),atan(z.y,z.x));
+}
+
+vec3 log_palette(float x) {
+    x=fract(x);
+    if(x<0.25) return mix(u_color_1.rgb,u_color_2.rgb,x*4.0);
+    if(x<0.50) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.25)*4.0);
+    if(x<0.75) return mix(u_color_3.rgb,u_color_4.rgb,(x-0.50)*4.0);
+    return mix(u_color_4.rgb,u_color_1.rgb,(x-0.75)*4.0);
+}
+
+vec4 fx_complex_log_lab(vec2 uv) {
+    vec2 z=(uv-vec2(0.5))*2.0/u_zoom+vec2(u_pan_x,u_pan_y);
+
+    vec2 c=vec2(u_c_x,u_c_y);
+    c+=vec2(u_c_motion_x,u_c_motion_y)*u_time;
+
+    float n=0.0;
+    float escaped=0.0;
+
+    for(int i=0;i<80;i++) {
+        if(float(i)>=u_iterations) break;
+
+        vec2 l=clog_lab(z);
+        vec2 next=l*u_log_scale+c;
+        z=mix(z,next,u_feedback);
+
+        n+=1.0;
+
+        if(length(z)>u_escape) {
+            escaped=1.0;
+            break;
+        }
+    }
+
+    float field;
+
+    if(u_color_mode<0.5)
+        field=n/u_iterations;
+    else if(u_color_mode<1.5)
+        field=log(1.0+length(z));
+    else if(u_color_mode<2.5)
+        field=(atan(z.y,z.x)+3.14159265)/6.2831853;
+    else if(u_color_mode<3.5)
+        field=abs(z.x);
+    else
+        field=abs(z.y);
+
+    field*=u_color_scale;
+    field+=u_time*u_color_cycle;
+
+    vec3 col=log_palette(field);
+
+    if(escaped>0.5)
+        col*=0.85;
+
+    return vec4(col,1.0);
+}
+"""
+
+const SRC_FRACTAL_6D: String="""
+uniform float u_render_mode = 0.0; // @label 6D Slice| @min 0.0 | @max 5.0 | @sens 1.0 | @is_style
+
+uniform float u_zoom = 1.000; // @label Zoom | @min 0.002 | @max 80.000 | @sens 0.0200
+uniform float u_pan_x = 0.000; // @label Pan X | @min -30.0 | @max 300.000 | @sens 0.0100
+uniform float u_pan_y = 0.000; // @label Pan Y | @min -30.0 | @max 300.000 | @sens 0.0100
+uniform float u_max_iterations = 64.000; // @label Iterations | @min 18.000 | @max 128.0 | @sens 1.000
+uniform float u_escape = 16.000; // @label Escape Radius | @min 1.000 | @max 64.0 | @sens 0.500
+
+// Z = starting value
+uniform float u_z_x = 0.000; // @label Z Real | @min -130.000 | @max 130.000 | @sens 0.0100
+uniform float u_z_y = 0.000; // @label Z Imaginary | @min -130.000 | @max 130.0 | @sens 0.0100
+uniform float u_z_motion_x = 0.000; // @label Z Motion X | @min -11.000 | @max 11.0 | @sens 0.0100
+uniform float u_z_motion_y = 0.000; // @label Z Motion Y | @min -11.000 | @max 11.0 | @sens 0.0100
+
+// C = constant
+uniform float u_c_x = -0.700; // @label C Real | @min -120.000 | @max 120.000 | @sens 0.0100
+uniform float u_c_y = 0.2700; // @label C Imaginary | @min -120.000 | @max 120.000 | @sens 0.0100
+uniform float u_c_motion_x = 0.0000; // @label C Motion X | @min -11.000 | @max 11.0 | @sens 0.0100
+uniform float u_c_motion_y = 0.0000; // @label C Motion Y | @min -11.000 | @max 11.0 | @sens 0.0100
+
+// X = complex exponent
+uniform float u_exp_x = 2.0000; // @label X Real | @min -130.0 | @max 140.000 | @sens 0.0100
+uniform float u_exp_y = 0.0000; // @label X Imaginary | @min -130.0 | @max 310.000 | @sens 0.0100
+uniform float u_exp_motion_x = 0.0000; // @label X Motion X | @min -11.000 | @max 11.0 | @sens 0.0100
+uniform float u_exp_motion_y = 0.0000; // @label X Motion Y | @min -11.000 | @max 11.0 | @sens 0.0100
+
+// Slice movement
+uniform float u_slice = 0.0000; // @label Slice Position | @min 0.000 | @max 11.000 | @sens 0.0100
+uniform float u_slice_motion = 0.0000; // @label Slice Motion | @min -11.000 | @max 11.000 | @sens 0.0100
+
+// Equation violence
+uniform float u_equation_mix = 0.000; // @label Equation Mix | @min 0.000 | @max 11.000 | @sens 0.0010
+uniform float u_equation_twist = 0.000; // @label Equation Twist | @min -60.000 | @max 60.000 | @sens 0.0010
+
+// Palette
+uniform float u_palette_frequency = 0.400; // @label Palette Frequency | @min 0.01 | @max 6.0 | @sens 0.0100
+uniform float u_color_cycle_speed = 0.000; // @label Color Cycle Speed | @min -2.0 | @max 2.0 | @sens 0.0100
+
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.01,0.08,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.10,0.25,0.80,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.85,0.15,0.70,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.75,0.15,1.0);
+
+vec2 cexp6(vec2 z) {
+    float e=exp(clamp(z.x,-8.0,8.0));
+    return vec2(e*cos(z.y),e*sin(z.y));
+}
+
+vec2 clog6(vec2 z) {
+    return vec2(log(max(length(z),0.000001)),atan(z.y,z.x));
+}
+
+vec2 cpow6(vec2 z,vec2 p) {
+    return cexp6(vec2(
+        p.x*clog6(z).x-p.y*clog6(z).y,
+        p.x*clog6(z).y+p.y*clog6(z).x
+    ));
+}
+
+vec3 palette6(float x) {
+    x=fract(x);
+    if(x<0.25) return mix(u_color_1.rgb,u_color_2.rgb,x/0.25);
+    if(x<0.50) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.25)/0.25);
+    if(x<0.75) return mix(u_color_3.rgb,u_color_4.rgb,(x-0.50)/0.25);
+    return mix(u_color_4.rgb,u_color_1.rgb,(x-0.75)/0.25);
+}
+
+vec4 fx_fractal_6d(vec2 uv) {
+    float time=u_time;
+
+    vec2 screen=(uv-vec2(0.5))*2.0/u_zoom;
+    screen+=vec2(u_pan_x,u_pan_y);
+
+    vec2 z=vec2(u_z_x,u_z_y);
+    vec2 c=vec2(u_c_x,u_c_y);
+    vec2 x=vec2(u_exp_x,u_exp_y);
+
+    z+=vec2(u_z_motion_x,u_z_motion_y)*time;
+    c+=vec2(u_c_motion_x,u_c_motion_y)*time;
+    x+=vec2(u_exp_motion_x,u_exp_motion_y)*time;
+
+    float slice=fract(u_slice+time*u_slice_motion);
+
+    if(u_render_mode<0.5) {
+        // Z plane: screen becomes Z.
+        z=screen;
+    } else if(u_render_mode<1.5) {
+        // C plane: screen becomes C.
+        c=screen;
+    } else if(u_render_mode<2.5) {
+        // X plane: screen becomes the exponent.
+        x=screen;
+    } else if(u_render_mode<3.5) {
+        // Z <-> C
+        z=mix(screen,z,slice);
+        c=mix(c,screen,slice);
+    } else if(u_render_mode<4.5) {
+        // Z <-> X
+        z=mix(screen,z,slice);
+        x=mix(x,screen,slice);
+    } else {
+        // C <-> X
+        c=mix(c,screen,slice);
+        x=mix(x,screen,slice);
+    }
+
+    float n=0.0;
+    float escaped=0.0;
+
+    for(int i=0;i<128;i++) {
+        if(float(i)>=u_max_iterations) break;
+
+        // z^x + c
+        vec2 next=cpow6(z,x)+c;
+
+        // Optional controlled perturbation.
+        float a=u_equation_twist*0.15;
+        if(abs(a)>0.0001) {
+            float ca=cos(a);
+            float sa=sin(a);
+            next=vec2(
+                next.x*ca-next.y*sa,
+                next.x*sa+next.y*ca
+            );
+        }
+
+        // Blend the mathematical step with the pure equation.
+        z=mix(next,cpow6(z,x)+c,u_equation_mix);
+
+        n+=1.0;
+
+        if(dot(z,z)>u_escape*u_escape) {
+            escaped=1.0;
+            break;
+        }
+    }
+
+    float shade=n/u_max_iterations;
+
+    if(escaped>0.5)
+        shade=n/u_max_iterations+0.15*log2(log2(max(length(z),1.0001)));
+
+    float p=shade*u_palette_frequency+time*u_color_cycle_speed;
+
+    return vec4(palette6(p),1.0);
+}
+"""
 
 const SRC_CHAOTIC_MAP: String = """
 uniform float u_strength = 0.35; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01
-uniform float u_iterations = 4.0; // @label Iterations | @min 1.0 | @max 12.0 | @sens 1.0
+uniform float u_iterations = 4.0; // @label Iterations | @min 1.0 | @max 12.0 | @sens 1.0 | @rest 0
 uniform float u_scale = 1.2; // @label Scale | @min 0.1 | @max 3.0 | @sens 0.01
 uniform float u_fold = 1.0; // @label Fold | @min 0.0 | @max 3.0 | @sens 0.01
 uniform float u_twist = 0.5; // @label Twist | @min -5.0 | @max 5.0 | @sens 0.01
@@ -553,7 +1443,7 @@ vec2 fx_chaotic_map(vec2 uv) {
 
 
 const SRC_LOG_SPIRAL: String = """
-uniform float u_twist = 1.0; // @label Twist | @min -10.0 | @max 10.0 | @sens 0.01
+uniform float u_twist = 1.0; // @label Twist | @min -10.0 | @max 10.0 | @sens 0.01 | @rest 0
 uniform float u_scale = 1.0; // @label Scale | @min 0.1 | @max 5.0 | @sens 0.01
 uniform float u_softness = 0.01; // @label Center Softness | @min 0.0001 | @max 0.5 | @sens 0.001
 uniform float u_motion = 0.0; // @label Motion | @min -2.0 | @max 2.0 | @sens 0.01
@@ -572,7 +1462,7 @@ vec2 fx_log_spiral(vec2 uv) {
 
 
 const SRC_MOBIUS: String = """
-uniform float u_strength = 0.5; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01
+uniform float u_strength = 0.5; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01 | @rest 0
 uniform float u_offset_x = 0.0; // @label X Offset | @min -1.0 | @max 1.0 | @sens 0.01
 uniform float u_offset_y = 0.0; // @label Y Offset | @min -1.0 | @max 1.0 | @sens 0.01
 uniform float u_rotation = 0.0; // @label Rotation | @min -3.14 | @max 3.14 | @sens 0.01
@@ -593,7 +1483,7 @@ vec2 fx_mobius(vec2 uv) {
 
 const SRC_POWER_WARP: String = """
 uniform float u_power = 1.5; // @label Power | @min 0.1 | @max 5.0 | @sens 0.01
-uniform float u_amount = 1.0; // @label Amount | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_amount = 1.0; // @label Amount | @min -2.0 | @max 2.0 | @sens 0.01 | @rest 0
 uniform float u_rotation = 0.0; // @label Rotation | @min -3.14 | @max 3.14 | @sens 0.01
 
 vec2 fx_power_warp(vec2 uv) {
@@ -611,7 +1501,7 @@ vec2 fx_power_warp(vec2 uv) {
 
 
 const SRC_EXPONENTIAL_WARP: String = """
-uniform float u_amount = 1.0; // @label Amount | @min -3.0 | @max 3.0 | @sens 0.01
+uniform float u_amount = 1.0; // @label Amount | @min -3.0 | @max 3.0 | @sens 0.01 | @rest 0
 uniform float u_frequency = 2.0; // @label Frequency | @min 0.1 | @max 10.0 | @sens 0.01
 uniform float u_rotation = 0.0; // @label Rotation | @min -3.14 | @max 3.14 | @sens 0.01
 uniform float u_motion = 0.0; // @label Motion | @min -2.0 | @max 2.0 | @sens 0.01
@@ -630,7 +1520,7 @@ vec2 fx_exponential_warp(vec2 uv) {
 
 
 const SRC_VECTOR_FIELD: String = """
-uniform float u_strength = 0.1; // @label Strength | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_strength = 0.1; // @label Strength | @min -2.0 | @max 2.0 | @sens 0.01 | @rest 0
 uniform float u_frequency = 4.0; // @label Frequency | @min 0.1 | @max 20.0 | @sens 0.1
 uniform float u_speed = 0.5; // @label Speed | @min -3.0 | @max 3.0 | @sens 0.01
 uniform float u_twist = 1.0; // @label Twist | @min -5.0 | @max 5.0 | @sens 0.01
@@ -653,7 +1543,7 @@ vec2 fx_vector_field(vec2 uv) {
 
 
 const SRC_HYPERBOLIC: String = """
-uniform float u_strength = 0.5; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01
+uniform float u_strength = 0.5; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01 | @rest 0
 uniform float u_softness = 0.02; // @label Singularity Softness | @min 0.0001 | @max 0.5 | @sens 0.001
 uniform float u_rotation = 0.0; // @label Rotation | @min -3.14 | @max 3.14 | @sens 0.01
 
@@ -672,7 +1562,7 @@ vec2 fx_hyperbolic(vec2 uv) {
 
 # TANGENT FOLD
 const SRC_TANGENT_FOLD: String = """
-uniform float u_amount = 0.05; // @label Amount | @min -1.0 | @max 1.0 | @sens 0.001
+uniform float u_amount = 0.05; // @label Amount | @min -1.0 | @max 1.0 | @sens 0.001 | @rest 0
 uniform float u_frequency = 4.0; // @label Frequency | @min 0.1 | @max 30.0 | @sens 0.1
 uniform float u_rotation = 0.0; // @label Rotation | @min -3.14 | @max 3.14 | @sens 0.01
 
@@ -690,7 +1580,7 @@ vec2 fx_tangent_fold(vec2 uv) {
 
 # COMPLEX INVERSION
 const SRC_COMPLEX_INVERSION: String = """
-uniform float u_strength = 1.0; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01
+uniform float u_strength = 1.0; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01 | @rest 0
 uniform float u_softness = 0.01; // @label Softness | @min 0.0001 | @max 0.5 | @sens 0.001
 uniform float u_offset_x = 0.0; // @label X Offset | @min -1.0 | @max 1.0 | @sens 0.01
 uniform float u_offset_y = 0.0; // @label Y Offset | @min -1.0 | @max 1.0 | @sens 0.01
@@ -711,7 +1601,7 @@ const SRC_ITERATED_INVERSION: String = """
 uniform float u_strength = 0.8; // @label Strength | @min -3.0 | @max 3.0 | @sens 0.01
 uniform float u_softness = 0.02; // @label Softness | @min 0.0001 | @max 0.5 | @sens 0.001
 uniform float u_scale = 1.2; // @label Scale | @min 0.1 | @max 3.0 | @sens 0.01
-uniform float u_iterations = 4.0; // @label Iterations | @min 1.0 | @max 10.0 | @sens 1.0
+uniform float u_iterations = 4.0; // @label Iterations | @min 1.0 | @max 10.0 | @sens 1.0 | @rest 0
 uniform float u_rotation = 0.0; // @label Rotation | @min -3.14 | @max 3.14 | @sens 0.01
 
 vec2 fx_iterated_inversion(vec2 uv) {
@@ -956,7 +1846,7 @@ vec4 fx_golden_fabric(vec2 uv) {
 
 
 const SRC_STRING_PI: String = """
-uniform float u_pi_amount = 0.12; // @label Pi Warp | @min -1.0 | @max 1.0 | @sens 0.01
+uniform float u_pi_amount = 0.12; // @label Pi Warp | @min -1.0 | @max 1.0 | @sens 0.01 | @rest 0
 uniform float u_pi_scale = 6.0; // @label Pi Scale | @min 0.1 | @max 30.0 | @sens 0.1
 uniform float u_pi_iterations = 5.0; // @label Pi Iterations | @min 1.0 | @max 12.0 | @sens 1.0
 uniform float u_pi_time = 0.15; // @label Pi Motion | @min -2.0 | @max 2.0 | @sens 0.01
@@ -1798,188 +2688,171 @@ vec4 fx_truchet_master(vec2 uv) {
 """
 
 
+const SRC_FRACTAL_UNFOLDING: String = """
+uniform float u_render_mode = 0.0; // @label Fractal | @min 0.0 | @max 5.0 | @sens 1.0 | @is_style
 
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.2 | @max 8.0 | @sens 0.02
+uniform float u_pan_x = 0.0; // @label Pan X | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_max_iterations = 64.0; // @label Iterations | @min 8.0 | @max 128.0 | @sens 1.0
+uniform float u_escape = 8.0; // @label Escape Radius | @min 2.0 | @max 32.0 | @sens 0.5
 
+// --- C / unfolding controls ---
+uniform float u_c_x = -0.7; // @label C X | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_c_y = 0.27; // @label C Y | @min -2.0 | @max 2.0 | @sens 0.01
+uniform float u_c_motion_x = 0.0000; // @label C Motion X | @min -1.0 | @max 1.0 | @sens 0.0100
+uniform float u_c_motion_y = 0.0000; // @label C Motion Y | @min -1.0 | @max 1.0 | @sens 0.0100
+uniform float u_c_orbit_x = 0.0000; // @label C Orbit X | @min -1.0 | @max 1.0 | @sens 0.0100
+uniform float u_c_orbit_y = 0.0000; // @label C Orbit Y | @min -1.0 | @max 1.0 | @sens 0.0100
+uniform float u_c_orbit_speed = 0.0; // @label C Orbit Speed | @min -5.0 | @max 5.0 | @sens 0.02
 
-const SRC_FRACTAL_MASTER: String = """
-uniform float u_render_mode = 0.0; // @label Fractal Type | @min 0.0 | @max 4.0 | @sens 1.0 | @is_style
+// --- Julia ---
+uniform float u_julia_power = 2.0; // @label Julia Power | @min 1.0 | @max 6.0 | @sens 0.01 | @style 0
 
-uniform float u_zoom = 1.0; // @label View: Zoom | @min 0.1 | @max 20.0 | @sens 0.05
-uniform vec2 u_pan = vec2(0.0); // @label View: Pan X/Y | @min -2.0 | @max 2.0 | @sens 0.01
-uniform float u_max_iterations = 96.0; // @label Detail / Max Iterations | @min 16.0 | @max 250.0 | @sens 1.0
+// --- Rational Web ---
+uniform float u_rational_pole = 1.0; // @label Pole Strength | @min 0.01 | @max 3.0 | @sens 0.01 | @style 1
+uniform float u_rational_power = 2.0; // @label Web Power | @min 1.0 | @max 5.0 | @sens 0.01 | @style 1
 
-// --- COLOR ---
-uniform float u_palette_frequency = 0.7; // @label Color Density | @min 0.05 | @max 12.0 | @sens 0.01
-uniform float u_color_cycle_speed = 0.0; // @label Color Cycle Speed | @min -3.0 | @max 3.0 | @sens 0.01
-uniform float u_color_pulse_amount = 0.0; // @label Color Pulse Amount | @min 0.0 | @max 1.0 | @sens 0.01
-uniform float u_color_pulse_speed = 0.5; // @label Color Pulse Speed | @min -5.0 | @max 5.0 | @sens 0.01
-uniform float u_color_pulse_frequency = 2.0; // @label Color Pulse Frequency | @min 0.1 | @max 12.0 | @sens 0.05
+// --- Reciprocal ---
+uniform float u_reciprocal_strength = 1.0; // @label Reciprocal Strength | @min 0.01 | @max 4.0 | @sens 0.01 | @style 2
+uniform float u_reciprocal_softness = 0.01; // @label Reciprocal Softness | @min 0.0001 | @max 0.2 | @sens 0.001 | @style 2
 
-uniform vec4 u_color_1 : source_color = vec4(0.01, 0.01, 0.05, 1.0); // @label Color 1 | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_2 : source_color = vec4(0.45, 0.0, 0.3, 1.0); // @label Color 2 | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_3 : source_color = vec4(1.0, 0.45, 0.02, 1.0); // @label Color 3 | @min 0 | @max 1 | @sens 0.02
-uniform vec4 u_color_4 : source_color = vec4(0.0, 0.9, 0.85, 1.0); // @label Color 4 | @min 0 | @max 1 | @sens 0.02
+// --- Sine ---
+uniform float u_sine_strength = 1.0; // @label Sine Strength | @min 0.1 | @max 4.0 | @sens 0.01 | @style 3
+uniform float u_sine_frequency = 1.0; // @label Sine Frequency | @min 0.1 | @max 5.0 | @sens 0.01 | @style 3
 
-uniform float u_color_stop_1 = 0.20; // @label Color Stop 1 | @min 0.01 | @max 0.5 | @sens 0.01
-uniform float u_color_stop_2 = 0.45; // @label Color Stop 2 | @min 0.15 | @max 0.75 | @sens 0.01
-uniform float u_color_stop_3 = 0.72; // @label Color Stop 3 | @min 0.4 | @max 0.95 | @sens 0.01
-uniform float u_color_softness = 0.04; // @label Color Softness | @min 0.001 | @max 0.25 | @sens 0.005
+// --- Exponential ---
+uniform float u_exp_strength = 1.0; // @label Exponential Strength | @min 0.1 | @max 3.0 | @sens 0.01 | @style 4
+uniform float u_exp_scale = 1.0; // @label Exponential Scale | @min 0.1 | @max 3.0 | @sens 0.01 | @style 4
 
-// --- VIEW MODULATION ---
-uniform float u_zoom_mod_amount = 0.0; // @label Zoom Modulation | @min 0.0 | @max 1.0 | @sens 0.01
-uniform float u_zoom_mod_speed = 0.5; // @label Zoom Mod Speed | @min -5.0 | @max 5.0 | @sens 0.01
+// --- Nova ---
+uniform float u_nova_strength = 1.0; // @label Nova Strength | @min 0.0 | @max 3.0 | @sens 0.01 | @style 5
+uniform float u_nova_relax = 1.0; // @label Nova Relax | @min 0.05 | @max 2.0 | @sens 0.01 | @style 5
 
-uniform float u_pan_mod_x = 0.0; // @label Pan Mod X | @min -1.0 | @max 1.0 | @sens 0.01
-uniform float u_pan_mod_y = 0.0; // @label Pan Mod Y | @min -1.0 | @max 1.0 | @sens 0.01
-uniform float u_pan_mod_speed = 0.5; // @label Pan Mod Speed | @min -5.0 | @max 5.0 | @sens 0.01
+// --- Palette ---
+uniform float u_palette_frequency = 0.4; // @label Palette Frequency | @min 0.01 | @max 4.0 | @sens 0.01
+uniform float u_color_cycle_speed = 0.0; // @label Color Cycle Speed | @min -2.0 | @max 2.0 | @sens 0.01
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.01,0.08,1.0);
+uniform vec4 u_color_2 : source_color = vec4(0.10,0.25,0.80,1.0);
+uniform vec4 u_color_3 : source_color = vec4(0.85,0.15,0.70,1.0);
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.75,0.15,1.0);
 
-// --- JULIA ---
-uniform vec2 u_julia_c = vec2(-0.7, 0.27015); // @label [Julia] Complex Seed | @min -2.0 | @max 2.0 | @sens 0.005 | @style 1
-uniform float u_julia_orbit = 0.0; // @label [Julia] Seed Orbit | @min 0.0 | @max 1.0 | @sens 0.01 | @style 1
-uniform float u_julia_orbit_speed = 0.3; // @label [Julia] Orbit Speed | @min -5.0 | @max 5.0 | @sens 0.01 | @style 1
-uniform float u_julia_orbit_size = 0.15; // @label [Julia] Orbit Size | @min 0.0 | @max 1.0 | @sens 0.01 | @style 1
-uniform float u_julia_mod_x = 0.0; // @label [Julia] Seed Mod X | @min -1.0 | @max 1.0 | @sens 0.01 | @style 1
-uniform float u_julia_mod_y = 0.0; // @label [Julia] Seed Mod Y | @min -1.0 | @max 1.0 | @sens 0.01 | @style 1
-
-// --- MULTIBROT ---
-uniform float u_power = 2.0; // @label [Multibrot] Power | @min 2.0 | @max 8.0 | @sens 0.05 | @style 4
-
-// --- FRACTAL MODULATION ---
-uniform float u_mod_amount = 0.0; // @label Fractal Modulation | @min 0.0 | @max 1.0 | @sens 0.01
-uniform float u_mod_frequency = 2.0; // @label Modulation Frequency | @min 0.1 | @max 12.0 | @sens 0.05
-uniform float u_mod_speed = 0.5; // @label Modulation Speed | @min -5.0 | @max 5.0 | @sens 0.01
-uniform float u_mod_twist = 0.0; // @label Modulation Twist | @min -5.0 | @max 5.0 | @sens 0.01
-
-float fractal_palette_segment(float x, float a, float b) {
-    return smoothstep(a, b, x);
+float cabs2(vec2 z) {
+    return dot(z,z);
 }
 
-vec3 fractal_palette(float t) {
-    float s1 = clamp(u_color_stop_1, 0.01, 0.98);
-    float s2 = max(s1 + 0.001, clamp(u_color_stop_2, 0.02, 0.99));
-    float s3 = max(s2 + 0.001, clamp(u_color_stop_3, 0.03, 0.999));
-    float soft = max(u_color_softness, 0.001);
-
-    if (t < s1)
-        return mix(u_color_1.rgb, u_color_2.rgb, smoothstep(0.0, s1, t));
-
-    if (t < s2)
-        return mix(u_color_2.rgb, u_color_3.rgb, smoothstep(s1, s2, t));
-
-    if (t < s3)
-        return mix(u_color_3.rgb, u_color_4.rgb, smoothstep(s2, s3, t));
-
-    return mix(u_color_4.rgb, u_color_1.rgb, smoothstep(s3, 1.0, t));
+vec2 cpow2(vec2 z) {
+    return vec2(z.x*z.x-z.y*z.y,2.0*z.x*z.y);
 }
 
-vec4 fx_fractal_master(vec2 uv) {
-    float time = u_time;
-    int mode = int(floor(u_render_mode + 0.05));
+vec2 cpow3(vec2 z) {
+    return vec2(
+        z.x*z.x*z.x-3.0*z.x*z.y*z.y,
+        3.0*z.x*z.x*z.y-z.y*z.y*z.y
+    );
+}
 
-    float zoom_mod = 1.0 + sin(time * u_zoom_mod_speed) * u_zoom_mod_amount;
-    float zoom = max(u_zoom * zoom_mod, 0.001);
+vec2 csin_unfold(vec2 z) {
+    float y=clamp(z.y,-5.0,5.0);
+    return vec2(sin(z.x)*cosh(y),cos(z.x)*sinh(y));
+}
 
-    vec2 pan = u_pan;
-    pan += vec2(
-        sin(time * u_pan_mod_speed) * u_pan_mod_x,
-        cos(time * u_pan_mod_speed * 1.13) * u_pan_mod_y
+vec2 cexp_unfold(vec2 z) {
+    float x=clamp(z.x,-4.0,4.0);
+    float e=exp(x);
+    return vec2(e*cos(z.y),e*sin(z.y));
+}
+
+vec3 unfold_palette(float x) {
+    x=fract(x);
+    if(x<0.25) return mix(u_color_1.rgb,u_color_2.rgb,x/0.25);
+    if(x<0.50) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.25)/0.25);
+    if(x<0.75) return mix(u_color_3.rgb,u_color_4.rgb,(x-0.50)/0.25);
+    return mix(u_color_4.rgb,u_color_1.rgb,(x-0.75)/0.25);
+}
+
+vec4 fx_fractal_unfolding(vec2 uv) {
+    vec2 z=(uv-vec2(0.5))*2.0/u_zoom+vec2(u_pan_x,u_pan_y);
+
+    float time=u_time;
+    vec2 c=vec2(u_c_x,u_c_y);
+    c+=vec2(u_c_motion_x,u_c_motion_y)*time;
+    c+=vec2(
+        cos(time*u_c_orbit_speed)*u_c_orbit_x,
+        sin(time*u_c_orbit_speed)*u_c_orbit_y
     );
 
-    vec2 st = (uv - 0.5) * 3.0 / zoom + pan;
+    float escaped=0.0;
+    float n=0.0;
 
-    // --- FRACTAL DOMAIN MODULATION ---
-    float mod_wave = sin(length(st) * u_mod_frequency - time * u_mod_speed);
-    float mod_angle = atan(st.y, st.x) + mod_wave * u_mod_twist * u_mod_amount;
-    float mod_radius = length(st) + mod_wave * u_mod_amount * 0.15;
+    for(int i=0;i<128;i++) {
+        if(float(i)>=u_max_iterations) break;
 
-    st = vec2(cos(mod_angle), sin(mod_angle)) * mod_radius;
+        if(u_render_mode<0.5) {
+            // Julia
+            float r=max(length(z),0.0001);
+            float a=atan(z.y,z.x);
+            float p=u_julia_power;
+            z=pow(r,p)*vec2(cos(a*p),sin(a*p))+c;
 
-    vec2 z = st;
-    vec2 c = st;
+        } else if(u_render_mode<1.5) {
+            // Rational Julia: (z^2+c)/(z^2-c)
+            vec2 zz=cpow2(z);
+            vec2 num=zz+c;
+            vec2 den=zz-c;
+            float d=max(cabs2(den),0.00001);
+            z=vec2(
+                (num.x*den.x+num.y*den.y)/d,
+                (num.y*den.x-num.x*den.y)/d
+            )*u_rational_pole;
 
-    if (mode == 1) {
-        c = u_julia_c;
+        } else if(u_render_mode<2.5) {
+            // Reciprocal Julia: z^2 + c/z
+            vec2 zz=cpow2(z);
+            float d=max(cabs2(z),u_reciprocal_softness);
+            vec2 inv=vec2(z.x,-z.y)/d;
+            z=zz+c*inv*u_reciprocal_strength;
 
-        float jt = time * u_julia_orbit_speed;
-        c += vec2(
-            cos(jt) * u_julia_orbit_size,
-            sin(jt * 1.17) * u_julia_orbit_size
-        ) * u_julia_orbit;
+        } else if(u_render_mode<3.5) {
+            // Sine Julia: c * sin(z)
+            z=csin_unfold(z*u_sine_frequency)*c*u_sine_strength;
 
-        c += vec2(
-            sin(time * 0.73) * u_julia_mod_x,
-            cos(time * 0.61) * u_julia_mod_y
-        );
+        } else if(u_render_mode<4.5) {
+            // Exponential Julia: c * exp(z)
+            z=cexp_unfold(z*u_exp_scale)*c*u_exp_strength;
 
-    } else if (mode == 2) {
-        z = abs(z);
-        c = st;
-
-    } else if (mode == 3) {
-        z = st;
-        c = st;
-        z.y = -z.y;
-
-    } else if (mode == 4) {
-        z = st;
-        c = st;
-    }
-
-    float iter_reached = 0.0;
-    float max_i = floor(u_max_iterations);
-
-    for (float i = 0.0; i < 250.0; i++) {
-        if (i >= max_i) break;
-
-        vec2 zz = z;
-
-        if (mode == 2) {
-            zz = abs(zz);
-        } else if (mode == 3) {
-            zz.y = -zz.y;
-        }
-
-        if (mode == 4) {
-            float r = length(zz);
-            float a = atan(zz.y, zz.x);
-            float p = max(u_power, 2.0);
-            zz = pow(r, p) * vec2(cos(a * p), sin(a * p));
         } else {
-            zz = vec2(
-                zz.x * zz.x - zz.y * zz.y,
-                2.0 * zz.x * zz.y
-            );
+            // Nova: relaxed Newton iteration for z^3-1
+            vec2 z2=cpow2(z);
+            vec2 z3=cpow3(z);
+            float d=max(cabs2(z2),0.00001);
+            vec2 ratio=vec2(
+                (z3.x*z2.x+z3.y*z2.y)/d,
+                (z3.y*z2.x-z3.x*z2.y)/d
+            )/3.0;
+            z=z-(ratio*u_nova_relax)+c*u_nova_strength;
         }
 
-        z = zz + c;
+        float r2=cabs2(z);
+        n+=1.0;
 
-        if (dot(z, z) > 4.0) {
-            iter_reached = i;
+        if(r2>u_escape*u_escape) {
+            escaped=1.0;
             break;
         }
     }
 
-    if (iter_reached >= max_i - 1.0)
-        return vec4(0.0, 0.0, 0.0, 1.0);
+    float shade=n/u_max_iterations;
 
-    float log_zn = log(max(dot(z, z), 0.00001)) / 2.0;
-    float nu = log(max(log_zn / log(2.0), 0.00001)) / log(2.0);
-    float smooth_i = iter_reached + 1.0 - nu;
+    if(escaped>0.5) {
+        float smooth_n=n-log2(log2(max(length(z),1.0001)));
+        shade=smooth_n/u_max_iterations;
+    }
 
-    float pulse = sin(
-        smooth_i * u_color_pulse_frequency
-        + time * u_color_pulse_speed
-    ) * 0.5 + 0.5;
+    float palette=shade*u_palette_frequency+time*u_color_cycle_speed;
+    vec3 col=unfold_palette(palette);
 
-    float palette_t = fract(
-        (smooth_i / max(max_i, 1.0)) * u_palette_frequency
-        + time * u_color_cycle_speed
-        + (pulse - 0.5) * u_color_pulse_amount
-    );
-
-    vec3 color = fractal_palette(palette_t);
-
-    return vec4(color, 1.0);
+    return vec4(col,1.0);
 }
 """
 

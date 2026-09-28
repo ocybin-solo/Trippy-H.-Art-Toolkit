@@ -20,8 +20,9 @@ var _stop_button: Button
 var _snapshot_stack: Array = []
 var _snapshot_values: Array = []
 var _current_file: String = ""
-var _current_hold: float = 6.0 # the on-screen preset's own hold time (falls back to lab.hold_seconds)
+var _current_hold: float = 6.0 # the on-screen preset's own hold time (falls back to FALLBACK_HOLD_SECONDS)
 var _hold_timer: SceneTreeTimer = null
+const FALLBACK_HOLD_SECONDS: float = 6.0 # only used by a preset saved before per-preset hold times existed
 
 
 func setup(main_manager, owner_options: Object) -> void:
@@ -120,9 +121,10 @@ func _advance() -> void:
 	if pool.is_empty():
 		pool = entries
 	var target: Dictionary = pool[randi() % pool.size()]
-	# -1 means the preset predates the per-preset hold-time feature: fall back to the dev-mode default
+	# -1 means the preset predates the per-preset hold-time feature -- every preset saved by the
+	# current save flow always has its own duration_sec, so this only matters for a very old file, if any remain
 	var target_hold: float = float(target.get("duration_sec", -1.0))
-	_current_hold = target_hold if target_hold > 0.0 else owner_menu.lab.hold_seconds
+	_current_hold = target_hold if target_hold > 0.0 else FALLBACK_HOLD_SECONDS
 
 	var transitions: Array = owner_menu.lab._scan_transition_presets()
 	if transitions.is_empty():

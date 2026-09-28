@@ -35,8 +35,10 @@ extends RefCounted
 ##                  whichever orientation you're in, so rotating it once fixes it everywhere
 ##   orient_mode (Auto / Landscape / Portrait), and the menu's own rotation and mirroring
 
+
 const SETTINGS_PATH: String = "user://tatool_settings.cfg"
 const MENU_SIZE_CHOICES: Array = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
+const GRID_SIZE_CHOICES: Array = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
 const COLUMNS: int = 5	
 const ROWS: int = 5
 const GRID_GAP: int = 4 # pixels between cells
@@ -99,9 +101,19 @@ var _edit_snapshot: Dictionary = {}
 # Grid scaling: the grid keeps its tuned proportions and just scales as a whole to fit the window,
 # so it never runs off-screen on a small window and grows to fill a large one.
 var _wrapper: Control
+var _camera_layer: Control = null
 var _grid_natural_size: Vector2 = Vector2.ZERO
 var _hide_btn: Button = null
+var buttons_hidden: bool = false
 
+## Hides the ENTIRE button grid -- every button, including OPT/PWR -- so the whole screen is free
+## for camera drag/scroll/rotate with nothing intercepting it or popping a menu open by accident.
+## There is deliberately no button-based way back, since every button is itself hidden: the only
+## way out is the same gesture that hid it (see PatternCameraLayer.gd's double-click handling).
+func toggle_buttons_hidden() -> void:
+	buttons_hidden = not buttons_hidden
+	if _wrapper != null:
+		_wrapper.visible = not buttons_hidden
 
 func _default_config(portrait: bool) -> Dictionary:
 	return {
@@ -111,6 +123,7 @@ func _default_config(portrait: bool) -> Dictionary:
 		"shader_size": DEFAULT_SHADER_SIZE_PORTRAIT if portrait else DEFAULT_SHADER_SIZE_LANDSCAPE,
 		"menu_scale": DEFAULT_MENU_SCALE_PORTRAIT if portrait else DEFAULT_MENU_SCALE_LANDSCAPE,
 		"grid_pan": DEFAULT_GRID_PAN_PORTRAIT if portrait else DEFAULT_GRID_PAN_LANDSCAPE,
+		"grid_scale": 1.0,
 	}
 
 # =========================================================================
@@ -127,6 +140,7 @@ func setup(main_manager, owner_options: Object) -> void:
 	main.get_window().size_changed.connect(_on_window_resized)
 	_apply_orient_mode()
 	_apply_menu_orient()
+
 	relayout()
 
 func _capture() -> void:
@@ -166,14 +180,20 @@ func _capture() -> void:
 
 	# One full-window Control everything lives on
 	_canvas = Control.new()
-	_canvas.mouse_filter = Control.MOUSE_FILTER_PASS
 	main.ui_canvas_layer.add_child(_canvas)
+
+	
+	_camera_layer = load("res://PatternCameraLayer.gd").new()
+	_camera_layer.setup(main, self)
+	_canvas.add_child(_camera_layer) # first child: sits behind the shader, grid, and any menu
 	_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	# The shader host is freely positioned (see relayout()), not inside any container
 	if host.get_parent() != null:
 		host.get_parent().remove_child(host)
 	_canvas.add_child(host)
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	main.canvas_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	host.set_anchors_preset(Control.PRESET_TOP_LEFT, false)
 
 	# The grid: a plain Control holding the grid AND the edit overlay. Positioned manually in
@@ -217,6 +237,7 @@ func _capture() -> void:
 		menu_host.get_parent().remove_child(menu_host)
 	_canvas.add_child(menu_host)
 	menu_host.set_anchors_preset(Control.PRESET_TOP_LEFT, false)
+
 
 	# The old center readout is no longer needed. It is kept alive (DynamicUI still holds a reference to it)
 	# but taken out of the tree.
@@ -356,6 +377,7 @@ func _anchor_window_point(frac: Vector2, win: Vector2) -> Vector2:
 ## Scales the grid to fit the window, then positions it: centered on the axis that has no slack,
 ## and shifted along the axis that does (the "long" axis for this orientation) by the saved pan
 ## amount. pan 0.5 = dead center (today's behavior); 0 / 1 = slid all the way to one end.
+
 func _update_grid_scale(win: Vector2, cfg: Dictionary, portrait: bool) -> void:
 	if _wrapper == null or _grid_natural_size.x <= 0.0 or _grid_natural_size.y <= 0.0:
 		return
@@ -363,6 +385,7 @@ func _update_grid_scale(win: Vector2, cfg: Dictionary, portrait: bool) -> void:
 		return
 	var s: float = minf(win.x / _grid_natural_size.x, win.y / _grid_natural_size.y) * GRID_FIT_MARGIN
 	s = clampf(s, GRID_MIN_SCALE, GRID_MAX_SCALE)
+	s *= float(cfg.get("grid_scale", 1.0))
 	_wrapper.scale = Vector2(s, s)
 
 	var scaled_size: Vector2 = _grid_natural_size * s
@@ -374,8 +397,6 @@ func _update_grid_scale(win: Vector2, cfg: Dictionary, portrait: bool) -> void:
 	else:
 		var slack_x: float = maxf(win.x - scaled_size.x, 0.0)
 		target_center.x += (pan - 0.5) * slack_x
-	# pivot_offset is the point that stays fixed under scaling, so this positions the SCALED
-	# grid's center at target_center regardless of what s is.
 	_wrapper.position = target_center - _wrapper.pivot_offset
 
 func _icon_state(id: String) -> Array:
@@ -535,6 +556,20 @@ func _end_edit() -> void:
 # =========================================================================
 # EDITING (called by the options menu; every change applies at once and is saved)
 # =========================================================================
+
+## The grid's current on-screen bounding box, in real window pixels -- used by things (like the
+## color picker) that render "on top of the grid," wherever it currently is (position, pan, scale).
+func grid_screen_rect() -> Rect2:
+	if _wrapper == null:
+		return Rect2()
+	var xform: Transform2D = _wrapper.get_global_transform()
+	var a: Vector2 = xform * Vector2.ZERO
+	var b: Vector2 = xform * _grid_natural_size
+	return Rect2(a, b - a)
+
+
+
+
 func button_name(id: String) -> String:
 	return BUTTON_NAMES.get(id, id)
 
@@ -561,6 +596,19 @@ func cycle_menu_size(step: int) -> void:
 		idx = MENU_SIZE_CHOICES.find(1.0)
 	idx = clampi(idx + step, 0, MENU_SIZE_CHOICES.size() - 1)
 	configs[orient]["menu_scale"] = MENU_SIZE_CHOICES[idx]
+	relayout()
+	save()
+	
+func grid_scale() -> float:
+	return float(configs[current_orient()]["grid_scale"])
+
+func cycle_grid_size(step: int) -> void:
+	var orient: int = current_orient()
+	var idx: int = GRID_SIZE_CHOICES.find(configs[orient]["grid_scale"])
+	if idx == -1:
+		idx = GRID_SIZE_CHOICES.find(1.0)
+	idx = clampi(idx + step, 0, GRID_SIZE_CHOICES.size() - 1)
+	configs[orient]["grid_scale"] = GRID_SIZE_CHOICES[idx]
 	relayout()
 	save()
 
@@ -658,6 +706,7 @@ func save() -> void:
 		cfg.set_value(section, "shader_size", configs[i]["shader_size"])
 		cfg.set_value(section, "grid_pan", configs[i]["grid_pan"])
 		cfg.set_value(section, "menu_scale", configs[i]["menu_scale"])
+		cfg.set_value(section, "grid_scale", configs[i]["grid_scale"])
 	cfg.save(SETTINGS_PATH)
 
 func load_settings() -> void:
@@ -705,6 +754,9 @@ func load_settings() -> void:
 		var msz = cfg.get_value(section, "menu_scale", -1.0)
 		if MENU_SIZE_CHOICES.has(msz):
 			c["menu_scale"] = msz
+		var gsz = cfg.get_value(section, "grid_scale", -1.0)
+		if GRID_SIZE_CHOICES.has(gsz):
+			c["grid_scale"] = gsz
 
 ## A saved arrangement is only trusted if every button appears once, each in its own valid cell.
 func _valid_positions(p) -> bool:
