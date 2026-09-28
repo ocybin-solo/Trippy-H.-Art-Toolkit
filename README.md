@@ -1,13 +1,14 @@
-Closed Beta README (readable inside APP, select "⚙️" then "HELP")
-APP NAME = Thinking of name still, leaning towards "Trippy H. Art Toolkit or "T.H.A.T." for short..
-sorta rolls funny off of the tongue, so...
+Closed Beta or PC (windows) beta README (readable inside APP, select "⚙️" then "HELP")
 
-**THATv2** What is it?
-* A shader sandbox that lets users design and save combinations of patterns & effects
-	* A shader is a small computer program that runs on a graphics processing unit (GPU) to calculate the color, light, and shape of images on a screen.
 
-* APP lets users design effects that only take place when switching between saved presets.
-* A screensaver mode = Once you have at least 2 - saved presets and 1 transition preset, you can toggle the screensaver ON.
+**T.H.A.T.** What is it?  [Trippy H. Art Toolkit]
+* A open source shader sandbox that lets users design and save combinations of patterns & effects
+* It has several animated patterns, and several effects, and a few crappy post process effect (hey it's a work in progress)')
+* Recently added : complex math shaders - navigate weird space and accidentally unfold virtual reality
+* Lets you save your work as a "preset"
+* Lets you design transitions between presets, called "transition presets"
+* Lets you watch a screensaver that you created
+
 
 **BASIC CONTROLS**
 
@@ -15,44 +16,40 @@ sorta rolls funny off of the tongue, so...
 * ↑ & ↓ = scroll through menu lists
 * ✔️= Confirms a menu selection
 * ❌= Cancels or returns from a menu
-* 🎛= Opens the Lab or the Transition Lab (where we customize the pattern, or transition style)
+* 💠= Opens the Lab or the Transition Lab (where we customize the pattern, or transition style)
 * ⚙️= Opens the Main Menu (Contains "screensaver dev" mode toggle, a help menu, a controller layout menu, and a colors menu for choosing background/button color")
-* ❤️= Toggles on FPS/VRAM monitor (shows frames per second & virtual memory usage, green=low,yellow=mid,red=high)
+* 🙉= Hides an open menu, keeping it's place
+* LMB or Touch + drag = PAN base layer (pass 1)
+* RMB or 2 finger twist = Rotate the base layer
+* Scroll wheel or 2 finger pinch = Zoom's the base layer 
+
  
 **KEY INFORMATION**
 
-* In the 🎛 Labs, you can only choose ONE base pattern, or ONE filter
-* You can choose any number of EFFECTS in "pass 2", and they stack on top of one another
-	* Example, if you add a swirl effect before a kaleidoscope, it would be appear different than adding a kaleidoscope before a swirl
-* You can customize your button layout & background colors, those option are inside of ⚙️ 
+* In the 💠 "Lab", you can only choose ONE basic pattern (pass 1), and ONE filter (pass 3)
+* You can choose any number of EFFECTS (pass 2), and they stack on top of one another, in the order that you stack them.
+* You can customize your button layout, button grid size, shader size, background colors, etc (in the app config menu, controller config)
 
 
 **ADVANCED CONTROLS**
 
-* Save a pattern preset = Open ⚙️ and select "presets", then click SAVE
-	* (tip: customize a pattern first)
-
-* Screensaver Dev Mode:
+* Save a pattern preset = Customize a pattern and add effects, then Open ⚙️ and select "presets", then click SAVE
+* Create a transition preset =
 	
 	1) Open ⚙️ and toggle "screensaver dev mode" ON 
-	2) Exit the menu.  You are now in screensaver dev mode. 
-	3) Pressing the 🎛 opens "transition editor menu"
-	4) Select & Configure the formulas (you can select any number of formulas here)
-	5) To try it out, exit the menu
+	2) Exit the main menu and push 💠 to open "transition lab"
+	3) Select & Configure the formula(s) then exit the menu
 	
 * When in Screensaver Dev Mode, additional controls are active:
 	
 	a) ← & → will transition between pattern presets (you must have at least two saved)
 	b) ↑ & ↓ will increase/decrease the duration of the transition (this duration will be saved, it is unique to each transition you create)
 	c) ✔️ button will offer open the SAVE menu for transitions
-	d) To load a saved transition, open the 🎛 lab, and scroll to the bottom to find the option "LOAD"
-	e) Currently, the best looking transitions I've made feature the options, but feel free to experiment
-	
-		a) fisheye
-		b) swirl
-		c) pixelate
+	d) To load a saved transition, open 💠 and scroll to the bottom to find the option "LOAD TRANSITION"
 		
 * Once you have saved a transition you can enable Screensaver Mode, which will automatically choose a random saved preset and a random saved transition
+
+
 
 ## License
 

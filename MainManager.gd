@@ -730,7 +730,7 @@ func _window_start(total: int, cursor: int) -> int:
 
 ## Compact number text: 1.1, 0.003, 12
 func _fmt(v: float) -> String:
-	var s: String = "%.5f" % v
+	var s: String = "%.10f" % v
 	return s.rstrip("0").rstrip(".")
 
 
@@ -893,17 +893,17 @@ func open_live_tweak_console() -> void:
 	if channel_names.size() > 1:
 		name_text += "  ·  " + channel_names[idx]
 	var lbl_name = Label.new()
-	lbl_name.text = " ║ NAME: %s " % name_text
+	lbl_name.text = " ║ NAME: %s     ║" % name_text
 	lbl_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	menu_list_box.add_child(lbl_name)
 
 	var value_text: String = ("ON" if display_value > 0.5 else "OFF") if is_bool else _fmt(display_value)
 	var lbl_val = Label.new()
 	if control_panel.last_tier5_row == 0:
-		lbl_val.text = " ▶ ║ VALUE: ◄ [ %s ] ► " % value_text
+		lbl_val.text = " ▶ ║ VALUE: ◄ [ %s ] ► ║" % value_text
 		lbl_val.add_theme_color_override("font_color", Color.YELLOW)
 	else:
-		lbl_val.text = "    ║ VALUE:   [ %s ]   " % value_text
+		lbl_val.text = "    ║ VALUE:   [ %s ]   ║" % value_text
 		lbl_val.add_theme_color_override("font_color", Color.DARK_GRAY)
 	lbl_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	menu_list_box.add_child(lbl_val)
@@ -911,10 +911,10 @@ func open_live_tweak_console() -> void:
 	var lbl_sens = Label.new()
 	var sens_text: String = "N/A (TOGGLE)" if is_bool else _fmt(control_panel.sensitivity)
 	if control_panel.last_tier5_row == 1:
-		lbl_sens.text = " ▶ ║ SENS : ◄ [ %s ] ► " % sens_text
+		lbl_sens.text = " ▶ ║ SENS : ◄ [ %s ] ► ║" % sens_text
 		lbl_sens.add_theme_color_override("font_color", Color.YELLOW)
 	else:
-		lbl_sens.text = "    ║ SENS :   [ %s ]   " % sens_text
+		lbl_sens.text = "    ║ SENS :   [ %s ]   ║" % sens_text
 		lbl_sens.add_theme_color_override("font_color", Color.DARK_GRAY)
 	lbl_sens.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	menu_list_box.add_child(lbl_sens)

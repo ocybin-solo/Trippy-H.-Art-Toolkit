@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Trippy Animation Tool"
-config/version="2.0"
+config/version="2.1.3"
 run/main_scene="uid://bcnt88dwpdalh"
 config/features=PackedStringArray("4.7", "Mobile")
 boot_splash/bg_color=Color(0, 0, 0, 1)

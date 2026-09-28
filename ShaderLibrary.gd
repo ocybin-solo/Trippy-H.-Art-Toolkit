@@ -19,7 +19,7 @@ extends RefCounted
 ##   Pass 2 (warp):     vec2 fx_<id>(vec2 uv)   stackable, chained in the order added
 ##   Pass 3 (filter):   vec4 fx_<id>(vec2 uv)   single-select for now, may sample u_warped_texture
 ## Recipes may read u_time. Never declare samplers or u_time; the assembler adds them.
-## Supported uniform types: float, int, bool, vec2, vec3, vec4 (vec4 is treated as a Color). int and
+## Supported uniform types: float, int, bool, vec2, vec3, vec4 (vec4, IF NOT a color needs to use the @raw tag). int and
 ## bool are REAL GLSL int/bool uniforms in the assembled shader -- write "int mode = ..." directly
 ## in your recipe's function body and compare it against real integers; no more float-into-int hacks
 ## like int(floor(u_render_mode + 0.05)).
@@ -27,6 +27,9 @@ extends RefCounted
 const PASS_PATTERN: int = 0
 const PASS_WARP: int = 1
 const PASS_FILTER: int = 2
+## One fixed 1-5 ladder shared by every uniform's tweak console, from very fine to coarse.
+const SENS_STEPS: Array = [0.000001, 0.000005, 0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005,
+		0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
 
 # id -> recipe dictionary. Insertion order is the menu order.
 var recipes: Dictionary = {}
@@ -145,7 +148,7 @@ func _template_globals(pass_index: int) -> String:
 	match pass_index:
 		PASS_PATTERN:
 			var g1: String = "uniform float u_global_zoom = 1.0; // @label Master Pattern Scale | @min 0.002 | @max 20.0 | @sens 0.05 | @global\n"
-			g1 += "uniform vec2 u_global_offset = vec2(0.0, 0.0); // @label Master Pan | @min -2.0 | @max 2.0 | @sens 0.01 | @global\n"
+			g1 += "uniform vec2 u_global_offset = vec2(0.0, 0.0); // @label Master Pan | @min -40.0 | @max 40.0 | @sens 0.01 | @global\n"
 			g1 += "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global\n"
 			g1 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global\n"
 			return g1
@@ -399,10 +402,34 @@ func clamp_component(rec: Dictionary, v: float) -> float:
 func default_component(rec: Dictionary, idx: int) -> float:
 	return get_component(rec["default"], rec["type"], idx)
 
-## Sensitivity steps built around the recommended value; the recommended one sits at index 2.
+## The steps the tweak console can pick from for this uniform: the shared ladder above, plus the
+## uniform's own recommended @sens slotted in as an extra rung if it isn't already one of them.
 func sens_ladder(rec: Dictionary) -> Array:
-	var s: float = rec["sens"]
-	return [s * 0.1, s * 0.5, s, s * 5.0, s * 10.0]
+	var ladder: Array = SENS_STEPS.duplicate()
+	var s: float = float(rec["sens"])
+	if s > 0.0:
+		var found: bool = false
+		for v in ladder:
+			if absf(float(v) - s) <= s * 0.001:
+				found = true
+				break
+		if not found:
+			ladder.append(s)
+			ladder.sort()
+	return ladder
+	
+## Which rung is the recommended step, i.e. where the console starts on a uniform you haven't tuned.
+func recommended_sens_index(rec: Dictionary) -> int:
+	var ladder: Array = sens_ladder(rec)
+	var s: float = float(rec["sens"])
+	var best: int = 0
+	var best_d: float = INF
+	for i in range(ladder.size()):
+		var d: float = absf(float(ladder[i]) - s)
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
 
 ## Seed missing values with defaults and push everything into the material.
 ## Pass in the per-pass value cache (keyed by final uniform name).
@@ -484,7 +511,7 @@ func _register_builtin_recipes() -> void:
 	_register("complex_self_power", PASS_PATTERN, "MATH LAB / COMPLEX SELF-POWER", SRC_COMPLEX_SELF_POWER, false)
 	_register("reciprocal_feedback", PASS_PATTERN, "MATH LAB / RECIPROCAL FEEDBACK", SRC_RECIPROCAL_FEEDBACK, false)
 	_register("quaternion_lab", PASS_PATTERN, "MATH LAB / QUATERNION SPACE", SRC_QUATERNION_LAB, false)
-	
+	_register("quaternion_lab_2", PASS_PATTERN, "MATH LAB / QUAT ROTATION", SRC_QUATERNION_LAB_2, false)
 	
 	#######  PASS 2 ########### (Warp Modules) - This Pass alone lets you add more than one at a time!
 	_register("kaleidoscope", PASS_WARP, "KALEIDO REFLECT", SRC_KALEIDOSCOPE, true)
@@ -524,6 +551,155 @@ func _register_builtin_recipes() -> void:
 
 
 
+const SRC_QUATERNION_LAB_2: String = """
+uniform float u_zoom = 2.9; // @label Zoom | @min 0.00001 | @max 100.0 | @sens 0.02
+uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
+
+uniform float u_q_z = 0.0; // @label Q Z Slice | @min -50.0 | @max 50.0 | @sens 0.00001
+uniform float u_q_w = 0.0; // @label Q W Slice | @min -50.0 | @max 50.0 | @sens 0.00001
+uniform float u_q_motion_z = 0.0; // @label Z Slice Motion | @min -10.0 | @max 10.0 | @sens 0.00001
+uniform float u_q_motion_w = 0.0; // @label W Slice Motion | @min -10.0 | @max 10.0 | @sens 0.00001
+
+uniform float u_c_x = 0.0; // @label C X | @min -50.0 | @max 50.0 | @sens 0.00001
+uniform float u_c_y = 0.0; // @label C Y | @min -50.0 | @max 50.0 | @sens 0.00001
+uniform float u_c_z = 0.0; // @label C Z | @min -50.0 | @max 50.0 | @sens 0.00001
+uniform float u_c_w = 0.0; // @label C W | @min -50.0 | @max 50.0 | @sens 0.00001
+uniform float u_c_motion_x = 0.0; // @label C X Motion | @min -10.0 | @max 10.0 | @sens 0.00001
+uniform float u_c_motion_y = 0.0; // @label C Y Motion | @min -10.0 | @max 10.0 | @sens 0.00001
+uniform float u_c_motion_z = 0.0; // @label C Z Motion | @min -10.0 | @max 10.0 | @sens 0.00001
+uniform float u_c_motion_w = 0.0; // @label C W Motion | @min -10.0 | @max 10.0 | @sens 0.00001
+
+uniform float u_a_x = 1.0; // @label A X | @min -20.0 | @max 20.0 | @sens 0.00001
+uniform float u_a_y = 0.0; // @label A Y | @min -20.0 | @max 20.0 | @sens 0.00001
+uniform float u_a_z = 0.0; // @label A Z | @min -20.0 | @max 20.0 | @sens 0.00001
+uniform float u_a_w = 0.0; // @label A W | @min -20.0 | @max 20.0 | @sens 0.00001
+
+uniform float u_b_x = 1.0; // @label B X | @min -20.0 | @max 20.0 | @sens 0.00001
+uniform float u_b_y = 0.0; // @label B Y | @min -20.0 | @max 20.0 | @sens 0.00001
+uniform float u_b_z = 0.0; // @label B Z | @min -20.0 | @max 20.0 | @sens 0.00001
+uniform float u_b_w = 0.0; // @label B W | @min -20.0 | @max 20.0 | @sens 0.00001
+
+uniform float u_operator_mix = 0.0; // @label A-Q-B Mix | @min -5.0 | @max 5.0 | @sens 0.00001
+
+uniform float u_rot_x = 1.0; // @label Rotation X | @min -5.0 | @max 5.0 | @sens 0.00001
+uniform float u_rot_y = 0.0; // @label Rotation Y | @min -5.0 | @max 5.0 | @sens 0.00001
+uniform float u_rot_z = 0.0; // @label Rotation Z | @min -5.0 | @max 5.0 | @sens 0.00001
+uniform float u_rot_w = 0.0; // @label Rotation W | @min -5.0 | @max 5.0 | @sens 0.00001
+uniform float u_rotation_strength = 1.0; // @label Quaternion Rotation Strength | @min -5.0 | @max 5.0 | @sens 0.01
+
+uniform float u_strength = 1.0; // @label Quaternion Strength | @min -10.0 | @max 10.0 | @sens 0.00001
+uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 10.0 | @sens 0.00001
+uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
+
+uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.00001
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.00001
+
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.0,0.08,1.0); // @label Color 1
+uniform vec4 u_color_2 : source_color = vec4(0.0,0.3,1.0,1.0); // @label Color 2
+uniform vec4 u_color_3 : source_color = vec4(1.0,0.1,0.7,1.0); // @label Color 3
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.8,0.1,1.0); // @label Color 4
+
+vec4 quat_mul_q(vec4 a,vec4 b) {
+    return vec4(
+        a.x*b.x-a.y*b.y-a.z*b.z-a.w*b.w,
+        a.x*b.y+a.y*b.x+a.z*b.w-a.w*b.z,
+        a.x*b.z-a.y*b.w+a.z*b.x+a.w*b.y,
+        a.x*b.w+a.y*b.z-a.z*b.y+a.w*b.x
+    );
+}
+
+vec4 quat_conj_q(vec4 q) {
+    return vec4(q.x,-q.y,-q.z,-q.w);
+}
+
+vec4 quat_rotate_q(vec4 q,vec4 r) {
+    r=normalize(r);
+    return quat_mul_q(quat_mul_q(r,q),quat_conj_q(r));
+}
+
+vec3 quat_palette_q(float x) {
+    x = fract(x);
+    if (x < 0.3333) return mix(u_color_1.rgb,u_color_2.rgb,x*3.0);
+    if (x < 0.6666) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.3333)*3.0);
+    return mix(u_color_3.rgb,u_color_4.rgb,(x-0.6666)*3.0);
+}
+
+vec4 fx_quaternion_lab_2(vec2 uv) {
+	float a=u_master_rotation;
+    float cs=cos(a);
+    float sn=sin(a);
+    vec2 p=(uv-vec2(0.5))*u_zoom+vec2(u_pan_x,u_pan_y);
+    p=mat2(vec2(cs,sn),vec2(-sn,cs))*p;
+
+    float t=u_time;
+
+    vec4 q=vec4(
+        p.x,
+        p.y,
+        u_q_z+t*u_q_motion_z,
+        u_q_w+t*u_q_motion_w
+    );
+
+    vec4 c=vec4(
+        u_c_x+t*u_c_motion_x,
+        u_c_y+t*u_c_motion_y,
+        u_c_z+t*u_c_motion_z,
+        u_c_w+t*u_c_motion_w
+    );
+
+    vec4 A=vec4(u_a_x,u_a_y,u_a_z,u_a_w);
+    vec4 B=vec4(u_b_x,u_b_y,u_b_z,u_b_w);
+    vec4 R=vec4(u_rot_x,u_rot_y,u_rot_z,u_rot_w);
+
+    float orbit=0.0;
+    float magnitude=0.0;
+
+    for(int i=0;i<60;i++) {
+        if(float(i)>=u_iterations) break;
+
+        vec4 square=quat_mul_q(q,q);
+        vec4 left_right=quat_mul_q(quat_mul_q(A,q),B);
+        vec4 next=mix(square,left_right,u_operator_mix)*u_strength+c;
+
+        if(abs(u_rotation_strength)>0.0001) {
+            vec4 rotated=quat_rotate_q(next,R);
+            next=mix(next,rotated,clamp(u_rotation_strength,0.0,1.0));
+        }
+
+        q=mix(q,next,u_feedback);
+        magnitude=dot(q,q);
+        orbit+=1.0;
+
+        if(magnitude>u_escape*u_escape) break;
+    }
+
+    float field;
+
+    if(u_color_field<0.5)
+        field=orbit/u_iterations;
+    else if(u_color_field<1.5)
+        field=sqrt(magnitude)*u_color_scale;
+    else if(u_color_field<2.5)
+        field=atan(q.y,q.x)/6.28318*u_color_scale;
+    else if(u_color_field<3.5)
+        field=q.z*u_color_scale;
+    else
+        field=q.w*u_color_scale;
+
+    field+=u_color_cycle*t;
+
+    vec3 col=quat_palette_q(field);
+    float glow=1.0/(1.0+0.15*sqrt(magnitude));
+
+    return vec4(col*glow,1.0);
+}
+"""
+
+
+
 const SRC_QUATERNION_LAB: String = """
 uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 20.0 | @sens 0.02
 uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
@@ -553,10 +729,10 @@ uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 |
 uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
 uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
 
-uniform vec3 u_color_1 = vec3(0.02,0.0,0.08); // @label Color 1
-uniform vec3 u_color_2 = vec3(0.0,0.3,1.0); // @label Color 2
-uniform vec3 u_color_3 = vec3(1.0,0.1,0.7); // @label Color 3
-uniform vec3 u_color_4 = vec3(1.0,0.8,0.1); // @label Color 4
+uniform vec4 u_color_1 : source_color = vec4(0.02,0.0,0.08,1.0); // @label Color 1
+uniform vec4 u_color_2 : source_color = vec4(0.0,0.3,1.0,1.0); // @label Color 2
+uniform vec4 u_color_3 : source_color = vec4(1.0,0.1,0.7,1.0); // @label Color 3
+uniform vec4 u_color_4 : source_color = vec4(1.0,0.8,0.1,1.0); // @label Color 4
 
 vec4 quat_mul(vec4 a, vec4 b) {
     return vec4(
@@ -573,9 +749,9 @@ vec4 quat_square(vec4 q) {
 
 vec3 quat_palette(float x) {
     x = fract(x);
-    if (x < 0.3333) return mix(u_color_1,u_color_2,x*3.0);
-    if (x < 0.6666) return mix(u_color_2,u_color_3,(x-0.3333)*3.0);
-    return mix(u_color_3,u_color_4,(x-0.6666)*3.0);
+    if (x < 0.3333) return mix(u_color_1.rgb,u_color_2.rgb,x*3.0);
+    if (x < 0.6666) return mix(u_color_2.rgb,u_color_3.rgb,(x-0.3333)*3.0);
+    return mix(u_color_3.rgb,u_color_4.rgb,(x-0.6666)*3.0);
 }
 
 vec4 fx_quaternion_lab(vec2 uv) {

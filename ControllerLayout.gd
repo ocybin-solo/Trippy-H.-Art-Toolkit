@@ -37,7 +37,7 @@ extends RefCounted
 
 
 const SETTINGS_PATH: String = "user://tatool_settings.cfg"
-const MENU_SIZE_CHOICES: Array = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
+const MENU_SIZE_CHOICES: Array = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.75, 2.0, 2.3]
 const GRID_SIZE_CHOICES: Array = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
 const COLUMNS: int = 5	
 const ROWS: int = 5
@@ -131,6 +131,7 @@ func _default_config(portrait: bool) -> Dictionary:
 # =========================================================================
 func setup(main_manager, owner_options: Object) -> void:
 	main = main_manager
+	
 	owner_menu = owner_options
 	configs = [_default_config(false), _default_config(true)]
 	_capture()
@@ -142,6 +143,14 @@ func setup(main_manager, owner_options: Object) -> void:
 	_apply_menu_orient()
 
 	relayout()
+
+## Lets the screensaver's full-screen catcher (above everything while it runs) hand its input to the
+## pattern camera, so panning/zooming works without stopping the screensaver.
+func feed_camera_input(event: InputEvent) -> void:
+	if _camera_layer != null:
+		_camera_layer.handle_external_input(event)
+
+
 
 func _capture() -> void:
 	var cp = main.control_panel
@@ -209,6 +218,7 @@ func _capture() -> void:
 	_wrapper = wrapper
 	_grid_natural_size = grid_size
 	var grid := GridContainer.new()
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	grid.columns = COLUMNS
 	grid.add_theme_constant_override("h_separation", GRID_GAP)
 	grid.add_theme_constant_override("v_separation", GRID_GAP)
@@ -237,7 +247,8 @@ func _capture() -> void:
 		menu_host.get_parent().remove_child(menu_host)
 	_canvas.add_child(menu_host)
 	menu_host.set_anchors_preset(Control.PRESET_TOP_LEFT, false)
-
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	main.canvas_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	# The old center readout is no longer needed. It is kept alive (DynamicUI still holds a reference to it)
 	# but taken out of the tree.
@@ -567,7 +578,13 @@ func grid_screen_rect() -> Rect2:
 	var b: Vector2 = xform * _grid_natural_size
 	return Rect2(a, b - a)
 
-
+## The shader display's current on-screen rect in real window pixels. Gestures use this (not the
+## window size) to turn finger movement into shader-space movement, so a drag is 1:1 under the
+## finger even when the shader isn't filling the window.
+func shader_screen_rect() -> Rect2:
+	if _host == null:
+		return Rect2()
+	return Rect2(_host.get_global_position(), _host.size)
 
 
 func button_name(id: String) -> String:

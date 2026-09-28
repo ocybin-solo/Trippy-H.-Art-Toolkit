@@ -91,6 +91,8 @@ var _repeat_next_msec: int = 0
 
 func _setup_hold_repeat() -> void:
 	set_process(false)
+	_make_repeating(btn_param_up, _on_dpad_up)
+	_make_repeating(btn_param_down, _on_dpad_down)
 	_make_repeating(btn_channel_prev, _on_dpad_left)
 	_make_repeating(btn_channel_next, _on_dpad_right)
 
@@ -303,13 +305,14 @@ func _step_sensitivity(step: int, main_manager) -> void:
 	sensitivity = ladder[current_sens_index]
 	sens_index_memory[rec["name"]] = current_sens_index
 
-## Enter Tier 5 for the selected uniform: restore its remembered sensitivity step (default = recommended).
 func enter_tweak_context() -> void:
 	var main_manager = get_tree().get_first_node_in_group("main_manager")
 	if not main_manager or parsed_uniforms.is_empty(): return
 	var rec: Dictionary = parsed_uniforms[active_index]
-	var ladder: Array = main_manager.library.sens_ladder(rec)
-	current_sens_index = clampi(int(sens_index_memory.get(rec["name"], 2)), 0, ladder.size() - 1)
+	var lib = main_manager.library
+	var ladder: Array = lib.sens_ladder(rec)
+	var start_idx: int = lib.recommended_sens_index(rec)
+	current_sens_index = clampi(int(sens_index_memory.get(rec["name"], start_idx)), 0, ladder.size() - 1)
 	sensitivity = ladder[current_sens_index]
 	last_tier5_row = 0
 	active_state = ControlState.TIER_5_TWEAK
@@ -566,7 +569,14 @@ func modify_active_value(direction_multiplier: float) -> void:
 	# Start from the cached value, or the shader's own default if this uniform was never touched
 	var current: Variant = uniform_values.get(u_name, rec["default"])
 	var new_comp: float = lib.get_component(current, u_type, idx) + direction_multiplier * sensitivity
-	new_comp = snappedf(lib.clamp_component(rec, new_comp), 0.000001)
+
+	# Snap away float drift (0.1 + 0.2 = 0.30000000000000004), but on a grid finer than this uniform's
+	# smallest step -- a fixed 0.000001 grid would round tiny @sens values away entirely.
+	var ladder: Array = lib.sens_ladder(rec)
+	var snap: float = minf(0.000001, float(ladder[0]) * 0.1)
+	if snap <= 0.0:
+		snap = 0.000001
+	new_comp = snappedf(lib.clamp_component(rec, new_comp), snap)
 
 	uniform_values[u_name] = lib.set_component(current, u_type, idx, new_comp)
 	uniform_changed.emit(u_name, uniform_values[u_name])

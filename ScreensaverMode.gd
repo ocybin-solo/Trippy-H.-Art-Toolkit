@@ -16,36 +16,52 @@ var owner_menu   # OptionsMenu (for .presets and .lab)
 
 var running: bool = false
 var _stop_layer: CanvasLayer
-var _stop_button: Button
+
+
 var _snapshot_stack: Array = []
 var _snapshot_values: Array = []
 var _current_file: String = ""
 var _current_hold: float = 6.0 # the on-screen preset's own hold time (falls back to FALLBACK_HOLD_SECONDS)
 var _hold_timer: SceneTreeTimer = null
 const FALLBACK_HOLD_SECONDS: float = 6.0 # only used by a preset saved before per-preset hold times existed
+const INTERACT_GRACE: float = 8.0 # seconds the show holds after your last pan/zoom/rotate
+
+var _stop_catcher: Control
+
 
 
 func setup(main_manager, owner_options: Object) -> void:
 	main = main_manager
 	owner_menu = owner_options
 
-	# A borderless full-screen button on its own high CanvasLayer, above the display, the controls and
-	# every menu. While it's showing, it is the only thing that can receive a tap: any tap anywhere stops
-	# the screensaver, exactly like touching the screen would wake a real one.
+	# A full-screen catcher on its own high CanvasLayer, above the display, the controls and every menu,
+	# so nothing underneath (grid buttons included) can be pressed mid-run. It doesn't stop on any
+	# touch anymore: it hands everything to the pattern camera, which pans/zooms/rotates for drags,
+	# pinches and the wheel, and only calls stop() for a still tap or click.
 	_stop_layer = CanvasLayer.new()
 	_stop_layer.layer = 10
 	main.add_child(_stop_layer)
-	_stop_button = Button.new()
-	_stop_button.flat = true
-	_stop_button.focus_mode = Control.FOCUS_NONE
-	_stop_button.mouse_filter = Control.MOUSE_FILTER_STOP
-	var empty := StyleBoxEmpty.new()
-	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
-		_stop_button.add_theme_stylebox_override(state, empty)
-	_stop_button.pressed.connect(stop)
-	_stop_layer.add_child(_stop_button)
-	_stop_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_stop_catcher = Control.new()
+	_stop_catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	_stop_layer.add_child(_stop_catcher)
+	_stop_catcher.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_stop_catcher.gui_input.connect(_on_stop_layer_input)
 	_stop_layer.visible = false
+
+func _on_stop_layer_input(event: InputEvent) -> void:
+	owner_menu.layout.feed_camera_input(event)
+
+## Called by the camera whenever you pan/zoom/rotate during a run, so the show doesn't yank the
+## preset away mid-exploration. Re-arms the hold timer to at least INTERACT_GRACE seconds.
+func note_interaction() -> void:
+	if not running or _hold_timer == null or not is_instance_valid(_hold_timer):
+		return
+	if _hold_timer.time_left > INTERACT_GRACE - 1.0:
+		return # plenty of time left; only re-arm about once a second
+	if _hold_timer.timeout.is_connected(_advance):
+		_hold_timer.timeout.disconnect(_advance)
+	_hold_timer = main.get_tree().create_timer(INTERACT_GRACE)
+	_hold_timer.timeout.connect(_advance)
 
 
 # =========================================================================
@@ -113,6 +129,7 @@ func _on_transition_finished() -> void:
 func _advance() -> void:
 	if not running:
 		return
+	_hold_timer = null # this timer just fired; note_interaction() must not try to extend it
 	var entries: Array = owner_menu.presets._scan()
 	if entries.size() < 2:
 		stop()
