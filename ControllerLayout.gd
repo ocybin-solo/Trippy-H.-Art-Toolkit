@@ -63,8 +63,8 @@ const DEFAULT_MENU_CENTER_LANDSCAPE: Vector2 = Vector2(0.31, 0.48)
 const DEFAULT_MENU_CENTER_PORTRAIT: Vector2 = Vector2(0.5, 0.27)
 const DEFAULT_SHADER_SIZE_LANDSCAPE: float = 1.0
 const DEFAULT_SHADER_SIZE_PORTRAIT: float = 0.9
-const DEFAULT_MENU_SCALE_LANDSCAPE: float = 1.0
-const DEFAULT_MENU_SCALE_PORTRAIT: float = 1.0
+const DEFAULT_MENU_SCALE_LANDSCAPE: float = 1.3
+const DEFAULT_MENU_SCALE_PORTRAIT: float = 1.3
 const DEFAULT_GRID_PAN_LANDSCAPE: float = 0.88
 const DEFAULT_GRID_PAN_PORTRAIT: float = 0.82
 
@@ -122,7 +122,8 @@ func _default_config(portrait: bool) -> Dictionary:
 		"menu_center": DEFAULT_MENU_CENTER_PORTRAIT if portrait else DEFAULT_MENU_CENTER_LANDSCAPE,
 		"shader_size": DEFAULT_SHADER_SIZE_PORTRAIT if portrait else DEFAULT_SHADER_SIZE_LANDSCAPE,
 		"menu_scale": DEFAULT_MENU_SCALE_PORTRAIT if portrait else DEFAULT_MENU_SCALE_LANDSCAPE,
-		"grid_pan": DEFAULT_GRID_PAN_PORTRAIT if portrait else DEFAULT_GRID_PAN_LANDSCAPE,
+		"grid_pan_x": DEFAULT_GRID_PAN_LANDSCAPE if not portrait else 0.5,
+		"grid_pan_y": 0.5 if not portrait else DEFAULT_GRID_PAN_PORTRAIT,
 		"grid_scale": 1.0,
 	}
 
@@ -353,7 +354,7 @@ func relayout() -> void:
 	var portrait: bool = win_size.y > win_size.x
 	var cfg: Dictionary = configs[1 if portrait else 0]
 
-	_update_grid_scale(win, cfg, portrait)
+	_update_grid_scale(win, cfg)
 
 	# Buttons into their cells, with their (shared) icon rotation / mirroring
 	for id in ALL_IDS:
@@ -389,7 +390,7 @@ func _anchor_window_point(frac: Vector2, win: Vector2) -> Vector2:
 ## and shifted along the axis that does (the "long" axis for this orientation) by the saved pan
 ## amount. pan 0.5 = dead center (today's behavior); 0 / 1 = slid all the way to one end.
 
-func _update_grid_scale(win: Vector2, cfg: Dictionary, portrait: bool) -> void:
+func _update_grid_scale(win: Vector2, cfg: Dictionary) -> void:
 	if _wrapper == null or _grid_natural_size.x <= 0.0 or _grid_natural_size.y <= 0.0:
 		return
 	if win.x <= 0.0 or win.y <= 0.0:
@@ -401,13 +402,10 @@ func _update_grid_scale(win: Vector2, cfg: Dictionary, portrait: bool) -> void:
 
 	var scaled_size: Vector2 = _grid_natural_size * s
 	var target_center: Vector2 = win * 0.5
-	var pan: float = float(cfg.get("grid_pan", 0.5))
-	if portrait:
-		var slack_y: float = maxf(win.y - scaled_size.y, 0.0)
-		target_center.y += (pan - 0.5) * slack_y
-	else:
-		var slack_x: float = maxf(win.x - scaled_size.x, 0.0)
-		target_center.x += (pan - 0.5) * slack_x
+	var slack_x: float = maxf(win.x - scaled_size.x, 0.0)
+	var slack_y: float = maxf(win.y - scaled_size.y, 0.0)
+	target_center.x += (float(cfg.get("grid_pan_x", 0.5)) - 0.5) * slack_x
+	target_center.y += (float(cfg.get("grid_pan_y", 0.5)) - 0.5) * slack_y
 	_wrapper.position = target_center - _wrapper.pivot_offset
 
 func _icon_state(id: String) -> Array:
@@ -499,24 +497,22 @@ func preview_anchor(key: String, local_point: Vector2) -> void:
 # REPOSITION SESSION
 # =========================================================================
 
-## Called by the overlay while dragging an EMPTY cell to pan the grid. px_delta is the raw pointer
-## movement in real screen pixels since the last call (global, not grid-local -- see note below).
-## Only the axis with slack for this orientation moves (Y in portrait, X in landscape); the other
-## component of px_delta is ignored. Not saved until edit_accept() (A) runs.
+## Called by the overlay while dragging an EMPTY cell to pan the grid, in whichever direction you
+## drag. Both axes have their own independent slack now that Grid Size can shrink the grid below
+## the window on either dimension -- dragging along an axis with no slack is simply a no-op there.
 func pan_grid_drag(px_delta: Vector2) -> void:
 	if not editing:
 		return
-	var portrait: bool = _edit_orient == 1
 	var win: Vector2 = Vector2(DisplayServer.window_get_size())
 	var scaled_size: Vector2 = _grid_natural_size * _wrapper.scale.x
 	var cfg: Dictionary = configs[_edit_orient]
-	var delta: float = px_delta.y if portrait else px_delta.x
-	var slack: float = maxf((win.y if portrait else win.x) - (scaled_size.y if portrait else scaled_size.x), 0.0)
-	if slack <= 0.0:
-		return
-	cfg["grid_pan"] = clampf(float(cfg["grid_pan"]) + delta / slack, 0.0, 1.0)
+	var slack_x: float = maxf(win.x - scaled_size.x, 0.0)
+	var slack_y: float = maxf(win.y - scaled_size.y, 0.0)
+	if slack_x > 0.0:
+		cfg["grid_pan_x"] = clampf(float(cfg["grid_pan_x"]) + px_delta.x / slack_x, 0.0, 1.0)
+	if slack_y > 0.0:
+		cfg["grid_pan_y"] = clampf(float(cfg["grid_pan_y"]) + px_delta.y / slack_y, 0.0, 1.0)
 	relayout()
-
 
 
 func begin_edit() -> void:
@@ -721,7 +717,8 @@ func save() -> void:
 		cfg.set_value(section, "shader_center", configs[i]["shader_center"])
 		cfg.set_value(section, "menu_center", configs[i]["menu_center"])
 		cfg.set_value(section, "shader_size", configs[i]["shader_size"])
-		cfg.set_value(section, "grid_pan", configs[i]["grid_pan"])
+		cfg.set_value(section, "grid_pan_x", configs[i]["grid_pan_x"])
+		cfg.set_value(section, "grid_pan_y", configs[i]["grid_pan_y"])
 		cfg.set_value(section, "menu_scale", configs[i]["menu_scale"])
 		cfg.set_value(section, "grid_scale", configs[i]["grid_scale"])
 	cfg.save(SETTINGS_PATH)
@@ -731,7 +728,7 @@ func load_settings() -> void:
 	if cfg.load(SETTINGS_PATH) != OK:
 		return
 	orient_mode = clampi(int(cfg.get_value("layout", "orient_mode", -1)), -1, 2)
-	if orient_mode == -1:
+	if orient_mode:
 		# An older version saved a forced orientation as 0 / 1 plus a "chosen" flag
 		var forced: bool = bool(cfg.get_value("layout", "orientation_custom", false))
 		orient_mode = 1 + clampi(int(cfg.get_value("layout", "orientation", 0)), 0, 1) if forced else 0
@@ -752,6 +749,7 @@ func load_settings() -> void:
 		if not cfg.has_section_key(section, "shader_center"):
 			continue
 		var c: Dictionary = _default_config(i == 1)
+		configs[i] = c
 		var pos = cfg.get_value(section, "pos", {})
 		if _valid_positions(pos):
 			c["pos"] = pos.duplicate()
@@ -764,10 +762,18 @@ func load_settings() -> void:
 		var sz = cfg.get_value(section, "shader_size", -1.0)
 		if SHADER_SIZE_CHOICES.has(sz):
 			c["shader_size"] = sz
-		configs[i] = c
-		var pan = cfg.get_value(section, "grid_pan", 0.5)
-		if pan is float or pan is int:
-			c["grid_pan"] = clampf(float(pan), 0.0, 1.0)
+
+		if cfg.has_section_key(section, "grid_pan_x") or cfg.has_section_key(section, "grid_pan_y"):
+			c["grid_pan_x"] = clampf(float(cfg.get_value(section, "grid_pan_x", 0.5)), 0.0, 1.0)
+			c["grid_pan_y"] = clampf(float(cfg.get_value(section, "grid_pan_y", 0.5)), 0.0, 1.0)
+		elif cfg.has_section_key(section, "grid_pan"):
+			# From before pan supported both axes: the single saved value was always the "long axis"
+			# pan for this orientation -- X in landscape, Y in portrait.
+			var old_pan: float = clampf(float(cfg.get_value(section, "grid_pan", 0.5)), 0.0, 1.0)
+			if i == 1:
+				c["grid_pan_y"] = old_pan
+			else:
+				c["grid_pan_x"] = old_pan
 		var msz = cfg.get_value(section, "menu_scale", -1.0)
 		if MENU_SIZE_CHOICES.has(msz):
 			c["menu_scale"] = msz

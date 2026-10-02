@@ -57,6 +57,7 @@ var _twist_engaged: bool = false
 # --- "double-tap to show buttons" hint
 var _hint: Label
 var _hint_tween: Tween
+var _pending_saver_stop: bool = false ## checks for double tap before exiting screensaver
 
 
 func setup(main_manager, controller_layout) -> void:
@@ -114,6 +115,7 @@ func _cancel_all() -> void:
 	_tap_candidate = false
 	_panning = false
 	_rotating = false
+	_pending_saver_stop = false
 
 ## The screensaver's full-screen catcher hands its events here so the camera keeps working while it runs.
 func handle_external_input(event: InputEvent) -> void:
@@ -206,15 +208,20 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	match event.button_index:
 		MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				if event.double_click and not _saver_running():
+				if event.double_click:
 					_panning = false
+					_pending_saver_stop = false # cancel whatever the first click's release armed below
 					_toggle_buttons(false)
 					return
 				_mouse_down_pos = p
 				_mouse_moved = false
 			elif _panning and _saver_running() and not _mouse_moved:
 				_panning = false
-				_saver().stop() # a clean click wakes the screensaver; a drag never does
+				# Might be the first half of a double-click -- wait out the window before waking the
+				# screensaver, same reasoning _finish_sequence() uses for touch.
+				_pending_saver_stop = true
+				get_tree().create_timer(float(DOUBLE_TAP_MS) / 1000.0).timeout.connect(_maybe_stop_saver)
+				_last_mouse = p
 				return
 			_panning = event.pressed
 			_last_mouse = p
@@ -340,21 +347,43 @@ func _finish_sequence(p: Vector2) -> void:
 		return
 	_tap_candidate = false
 	var now: int = Time.get_ticks_msec()
+	var saver: bool = _saver_running()
+	var tap_limit: int = SAVER_TAP_MAX_MS if saver else TAP_MAX_MS
+	if now - _down_ms > tap_limit:
+		return # held too long to count as a tap either way
 
-	if _saver_running():
-		# A still touch wakes the screensaver; drags, pinches and twists never do
-		if now - _down_ms <= SAVER_TAP_MAX_MS:
-			_saver().stop()
+	var is_double: bool = now - _last_tap_ms <= DOUBLE_TAP_MS and p.distance_to(_last_tap_pos) <= DOUBLE_TAP_PX
+
+	if saver:
+		if is_double:
+			# The second tap of a double-tap always means "toggle the buttons," never "wake up" --
+			# cancel whatever the first tap armed below.
+			_last_tap_ms = -100000
+			_pending_saver_stop = false
+			_dbg("double-tap while saver running -- toggling buttons, not waking")
+			_toggle_buttons(true)
+			return
+		# This tap alone would wake the screensaver, but it might be the first half of a double-tap
+		# that hasn't arrived yet -- wait out the double-tap window before committing to it.
+		_last_tap_ms = now
+		_last_tap_pos = p
+		_pending_saver_stop = true
+		get_tree().create_timer(float(DOUBLE_TAP_MS) / 1000.0).timeout.connect(_maybe_stop_saver)
 		return
-	if now - _down_ms > TAP_MAX_MS:
-		return
-	if now - _last_tap_ms <= DOUBLE_TAP_MS and p.distance_to(_last_tap_pos) <= DOUBLE_TAP_PX:
+
+	if is_double:
 		_last_tap_ms = -100000
 		_dbg("double-tap")
 		_toggle_buttons(true)
 	else:
 		_last_tap_ms = now
 		_last_tap_pos = p
+
+func _maybe_stop_saver() -> void:
+	if _pending_saver_stop and _saver_running():
+		_pending_saver_stop = false
+		_dbg("single tap confirmed after double-tap window -- waking screensaver")
+		_saver().stop()
 
 
 # ------------------------------------------------------------------

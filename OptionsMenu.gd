@@ -41,6 +41,7 @@ const TREE: Dictionary = {
 		"rows": [
 			{"label": "BACKGROUND COLOR", "kind": "color", "key": "bg_color"},
 			{"label": "BUTTON COLOR", "kind": "color", "key": "button_color"},
+			{"label": "MENU PANEL COLOR", "kind": "color", "key": "menu_panel_color"},
 			{"label": "[ RESET COLORS TO DEFAULT ]", "kind": "action", "action": "reset_colors"},
 		],
 	},
@@ -88,8 +89,10 @@ func setup(main_manager) -> void:
 	# Capture what the app looks like BEFORE any customization so RESET can restore it
 	defaults["bg_color"] = ProjectSettings.get_setting("rendering/environment/defaults/default_clear_color", Color(0.3, 0.3, 0.3, 1.0))
 	defaults["button_color"] = _read_default_button_color()
+	defaults["menu_panel_color"] = Color(0.02, 0.02, 0.04, 0.75)
 	settings["bg_color"] = defaults["bg_color"]
 	settings["button_color"] = defaults["button_color"]
+	settings["menu_panel_color"] = defaults["menu_panel_color"]
 	_load_settings()
 	layout = load("res://ControllerLayout.gd").new()
 	layout.setup(main, self) # builds every grid button, incl. the hide-menu one -- must run before _apply_all()
@@ -118,7 +121,7 @@ func _load_settings() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SETTINGS_PATH) != OK:
 		return
-	for key in ["bg_color", "button_color"]:
+	for key in ["bg_color", "button_color","menu_panel_color"]:
 		if cfg.get_value("colors", key + "_custom", false):
 			var c = cfg.get_value("colors", key, settings[key])
 			if c is Color:
@@ -128,7 +131,7 @@ func _load_settings() -> void:
 func _save_settings() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(SETTINGS_PATH) # keep the sections owned by ControllerLayout and PresetsMenu
-	for key in ["bg_color", "button_color"]:
+	for key in ["bg_color", "button_color","menu_panel_color"]:
 		cfg.set_value("colors", key + "_custom", custom[key])
 		cfg.set_value("colors", key, settings[key])
 	cfg.save(SETTINGS_PATH)
@@ -140,6 +143,10 @@ func _save_settings() -> void:
 func _apply_all() -> void:
 	_apply_background()
 	_apply_buttons()
+	_apply_menu_panel_color()
+
+func _apply_menu_panel_color() -> void:
+	main.apply_menu_panel_color(settings["menu_panel_color"])
 
 ## Background = the window color behind the whole console (the shader display is unaffected).
 func _apply_background() -> void:
@@ -204,10 +211,13 @@ func _set_channel(key: String, idx: int, v: float) -> void:
 func _on_picker_color_changed(c: Color) -> void:
 	settings[active_key] = c
 	custom[active_key] = true
-	if active_key == "bg_color":
-		_apply_background()
-	else:
-		_apply_buttons()
+	match active_key:
+		"bg_color":
+			_apply_background()
+		"button_color":
+			_apply_buttons()
+		"menu_panel_color":
+			_apply_menu_panel_color()
 	_save_settings()
 
 func _on_picker_color_done() -> void:
@@ -221,8 +231,10 @@ func _default_channel(key: String, idx: int) -> float:
 func _reset_colors() -> void:
 	settings["bg_color"] = defaults["bg_color"]
 	settings["button_color"] = defaults["button_color"]
+	settings["menu_panel_color"] = defaults["menu_panel_color"]
 	custom["bg_color"] = false
 	custom["button_color"] = false
+	custom["menu_panel_color"] = false
 	_apply_all()
 	_save_settings()
 

@@ -147,7 +147,7 @@ func _pass_header(pass_index: int) -> String:
 func _template_globals(pass_index: int) -> String:
 	match pass_index:
 		PASS_PATTERN:
-			var g1: String = "uniform float u_global_zoom = 1.0; // @label Master Pattern Scale | @min 0.002 | @max 20.0 | @sens 0.05 | @global\n"
+			var g1: String = "uniform float u_global_zoom = 1.0; // @label Master Pattern Scale | @min 0.0001 | @max 100.0 | @sens 0.05 | @global\n"
 			g1 += "uniform vec2 u_global_offset = vec2(0.0, 0.0); // @label Master Pan | @min -40.0 | @max 40.0 | @sens 0.01 | @global\n"
 			g1 += "uniform float u_rotation_speed = 0.0; // @label Rotation Speed | @min -2 | @max 2 | @sens 0.05 | @global\n"
 			g1 += "uniform float u_master_rotation = 0.0; // @label Master Canvas Spin | @min -3.1416 | @max 3.1416 | @sens 0.05 | @global\n"
@@ -512,6 +512,7 @@ func _register_builtin_recipes() -> void:
 	_register("reciprocal_feedback", PASS_PATTERN, "MATH LAB / RECIPROCAL FEEDBACK", SRC_RECIPROCAL_FEEDBACK, false)
 	_register("quaternion_lab", PASS_PATTERN, "MATH LAB / QUATERNION SPACE", SRC_QUATERNION_LAB, false)
 	_register("quaternion_lab_2", PASS_PATTERN, "MATH LAB / QUAT ROTATION", SRC_QUATERNION_LAB_2, false)
+	_register("octonion_g2", PASS_PATTERN, "MATH LAB / OCTONION / G2", SRC_OCTONION_G2_LAB, false)
 	
 	#######  PASS 2 ########### (Warp Modules) - This Pass alone lets you add more than one at a time!
 	_register("kaleidoscope", PASS_WARP, "KALEIDO REFLECT", SRC_KALEIDOSCOPE, true)
@@ -550,9 +551,219 @@ func _register_builtin_recipes() -> void:
 	_register("fxaa_filter", PASS_FILTER, "✨ FXAA ANTI-ALIASING LENS", SRC_FXAA_FILTER, false)
 
 
+const SRC_OCTONION_G2_LAB: String = """
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.00001 | @max 150.0 | @sens 0.0001
+uniform float u_pan_x = 0.0; // @label Pan X | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_pan_y = 0.0; // @label Pan Y | @min -100.0 | @max 100.0 | @sens 0.001
+
+uniform float u_q3 = 0.0; // @label Q3 | @min -100.0 | @max 100.0 | @sens 0.0001
+uniform float u_q4 = 0.0; // @label Q4 | @min -100.0 | @max 100.0 | @sens 0.0001
+uniform float u_q5 = 0.0; // @label Q5 | @min -100.0 | @max 100.0 | @sens 0.0001
+uniform float u_q6 = 0.0; // @label Q6 | @min -100.0 | @max 100.0 | @sens 0.0001
+uniform float u_q7 = 0.0; // @label Q7 | @min -100.0 | @max 100.0 | @sens 0.0001
+
+uniform float u_c0 = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c1 = 0.0; // @label C1 | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c2 = 0.0; // @label C2 | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c3 = 0.0; // @label C3 | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c4 = 0.0; // @label C4 | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c5 = 0.0; // @label C5 | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c6 = 0.0; // @label C6 | @min -100.0 | @max 100.0 | @sens 0.001
+uniform float u_c7 = 0.0; // @label C7 | @min -100.0 | @max 100.0 | @sens 0.001
+
+uniform float u_g2_a = 0.0; // @label G2 A | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_b = 0.0; // @label G2 B | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_c = 0.0; // @label G2 C | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_d = 0.0; // @label G2 D | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_e = 0.0; // @label G2 E | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_f = 0.0; // @label G2 F | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_g = 0.0; // @label G2 G | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_h = 0.0; // @label G2 H | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_i = 0.0; // @label G2 I | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_j = 0.0; // @label G2 J | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_k = 0.0; // @label G2 K | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_l = 0.0; // @label G2 L | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_m = 0.0; // @label G2 M | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_n = 0.0; // @label G2 N | @min -20.0 | @max 20.0 | @sens 0.0001
+
+uniform float u_g2_strength = 0.15; // @label G2 Strength | @min -20.0 | @max 20.0 | @sens 0.0001
+uniform float u_g2_steps = 3.0; // @label G2 Steps | @min 1.0 | @max 12.0 | @sens 1.0
+uniform float u_c_motion = 0.0; // @label C Motion | @min -10.0 | @max 10.0 | @sens 0.001
+uniform float u_feedback = 1.250; // @label Feedback | @min 0.0 | @max 10.0 | @sens 0.001
+uniform float u_strength = 4.0; // @label Equation Strength | @min -10.0 | @max 10.0 | @sens 0.001
+uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 0.1
+
+uniform float u_color_field = 3.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.00001 | @max 20.0 | @sens 0.001
+uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -10.0 | @max 10.0 | @sens 0.001
+
+uniform vec3 u_color_1 = vec3(0.02,0.01,0.08); // @label Color 1
+uniform vec3 u_color_2 = vec3(0.05,0.3,1.0); // @label Color 2
+uniform vec3 u_color_3 = vec3(0.8,0.05,0.7); // @label Color 3
+uniform vec3 u_color_4 = vec3(1.0,0.8,0.05); // @label Color 4
+
+vec3 oct_g2_color(float x) {
+    x=fract(x);
+    if(x<0.3333) return mix(u_color_1,u_color_2,smoothstep(0.0,0.3333,x));
+    if(x<0.6666) return mix(u_color_2,u_color_3,smoothstep(0.3333,0.6666,x));
+    return mix(u_color_3,u_color_4,smoothstep(0.6666,1.0,x));
+}
+
+vec4 fx_octonion_g2(vec2 uv) {
+    vec2 p=(uv-vec2(0.5))/u_zoom+vec2(u_pan_x,u_pan_y);
+
+    float t=u_time*u_c_motion;
+
+    float q0=0.0;
+    float q1=p.x;
+    float q2=p.y;
+    float q3=u_q3;
+    float q4=u_q4;
+    float q5=u_q5;
+    float q6=u_q6;
+    float q7=u_q7;
+
+    float c0=u_c0+t;
+    float c1=u_c1+t;
+    float c2=u_c2+t;
+    float c3=u_c3+t;
+    float c4=u_c4;
+    float c5=u_c5;
+    float c6=u_c6;
+    float c7=u_c7;
+
+    float trap=0.0;
+    float radius=0.0;
+    float iter=0.0;
+
+    for(int n=0;n<60;n++) {
+        if(float(n)>=u_iterations) break;
+
+        float rr=q1*q1+q2*q2+q3*q3+q4*q4+q5*q5+q6*q6+q7*q7;
+
+        float next0=q0*q0-rr;
+        float next1=2.0*q0*q1;
+        float next2=2.0*q0*q2;
+        float next3=2.0*q0*q3;
+        float next4=2.0*q0*q4;
+        float next5=2.0*q0*q5;
+        float next6=2.0*q0*q6;
+        float next7=2.0*q0*q7;
+
+        q0=mix(q0,next0*u_strength+c0,u_feedback);
+        q1=mix(q1,next1*u_strength+c1,u_feedback);
+        q2=mix(q2,next2*u_strength+c2,u_feedback);
+        q3=mix(q3,next3*u_strength+c3,u_feedback);
+        q4=mix(q4,next4*u_strength+c4,u_feedback);
+        q5=mix(q5,next5*u_strength+c5,u_feedback);
+        q6=mix(q6,next6*u_strength+c6,u_feedback);
+        q7=mix(q7,next7*u_strength+c7,u_feedback);
+
+        int steps=int(clamp(u_g2_steps,1.0,12.0));
+        float hstep=u_g2_strength/float(steps);
+
+        for(int s=0;s<12;s++) {
+            if(s>=steps) break;
+
+            float d1=
+                u_g2_c*q2-u_g2_b*q3+
+                u_g2_e*q4-u_g2_d*q5-
+                u_g2_g*q6+(u_g2_f-u_g2_m)*q7;
+
+            float d2=
+                -u_g2_c*q1+u_g2_a*q3+
+                u_g2_f*q4+(-u_g2_g+u_g2_n)*q5+
+                (u_g2_d-u_g2_k)*q6+
+                (-u_g2_e-u_g2_l)*q7;
+
+            float d3=
+                u_g2_b*q1-u_g2_a*q2-
+                u_g2_n*q4+u_g2_m*q5+
+                u_g2_l*q6-u_g2_k*q7;
+
+            float d4=
+                -u_g2_e*q1-u_g2_f*q2+
+                u_g2_n*q3+(-u_g2_a+u_g2_h)*q5+
+                (-u_g2_b+u_g2_i)*q6+
+                (u_g2_c-u_g2_j)*q7;
+
+            float d5=
+                u_g2_d*q1+(u_g2_g-u_g2_n)*q2-
+                u_g2_m*q3+(u_g2_a-u_g2_h)*q4+
+                u_g2_j*q6+u_g2_i*q7;
+
+            float d6=
+                u_g2_g*q1+(u_g2_k-u_g2_d)*q2-
+                u_g2_l*q3+(u_g2_b-u_g2_i)*q4-
+                u_g2_j*q5-u_g2_h*q7;
+
+            float d7=
+                (-u_g2_f+u_g2_m)*q1+
+                (u_g2_e+u_g2_l)*q2+
+                u_g2_k*q3+(-u_g2_c+u_g2_j)*q4-
+                u_g2_i*q5+u_g2_h*q6;
+
+            q1+=d1*hstep;
+            q2+=d2*hstep;
+            q3+=d3*hstep;
+            q4+=d4*hstep;
+            q5+=d5*hstep;
+            q6+=d6*hstep;
+            q7+=d7*hstep;
+
+            float old_len=sqrt(
+                q1*q1+q2*q2+q3*q3+
+                q4*q4+q5*q5+q6*q6+q7*q7
+            );
+
+            if(old_len>0.000001) {
+                float inv_len=1.0/old_len;
+                q1*=inv_len;
+                q2*=inv_len;
+                q3*=inv_len;
+                q4*=inv_len;
+                q5*=inv_len;
+                q6*=inv_len;
+                q7*=inv_len;
+            }
+        }
+
+        radius=sqrt(
+            q0*q0+q1*q1+q2*q2+q3*q3+
+            q4*q4+q5*q5+q6*q6+q7*q7
+        );
+
+        trap+=abs(q0)+abs(q1)+abs(q2)+abs(q3);
+        trap+=abs(q4)+abs(q5)+abs(q6)+abs(q7);
+
+        iter=float(n);
+
+        if(radius>u_escape) break;
+    }
+
+    float field=0.0;
+
+    if(u_color_field<0.5)
+        field=iter/max(u_iterations,1.0);
+    else if(u_color_field<1.5)
+        field=log(1.0+radius)*u_color_scale;
+    else if(u_color_field<2.5)
+        field=atan(q2,q1)/6.2831853+0.5;
+    else if(u_color_field<3.5)
+        field=q0*u_color_scale;
+    else
+        field=sqrt(q1*q1+q2*q2+q3*q3)*u_color_scale;
+
+    field+=trap*0.01+u_time*u_color_cycle;
+
+    return vec4(oct_g2_color(field),1.0);
+}
+"""
+
 
 const SRC_QUATERNION_LAB_2: String = """
-uniform float u_zoom = 2.9; // @label Zoom | @min 0.00001 | @max 100.0 | @sens 0.02
+uniform float u_zoom = 2.9; // @label Zoom | @min 0.00001 | @max 200.0 | @sens 0.02
 uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
 uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
 
@@ -593,7 +804,7 @@ uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 10.0 | @sen
 uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
 uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
 
-uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_field = 1.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
 uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.00001
 uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.00001
 
@@ -701,7 +912,7 @@ vec4 fx_quaternion_lab_2(vec2 uv) {
 
 
 const SRC_QUATERNION_LAB: String = """
-uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 20.0 | @sens 0.02
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 220.0 | @sens 0.02
 uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
 uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
 
@@ -725,7 +936,7 @@ uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 10.0 | @sen
 uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
 uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
 
-uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
+uniform float u_color_field = 2.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
 uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 12.0 | @sens 0.01
 uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -3.0 | @max 3.0 | @sens 0.01
 
@@ -808,7 +1019,7 @@ vec4 fx_quaternion_lab(vec2 uv) {
 
 
 const SRC_RECIPROCAL_FEEDBACK: String = """
-uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 20.0 | @sens 0.01
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 220.0 | @sens 0.01
 uniform float u_pan_x = 0.0; // @label Pan X | @min -40.0 | @max 40.0 | @sens 0.01
 uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
 
@@ -1038,14 +1249,14 @@ uniform float u_x_imag = 0.0; // @label X Imaginary | @min -100.0 | @max 100.0 |
 uniform float u_x_motion_x = 0.0; // @label X Motion Real | @min -20.0 | @max 20.0 | @sens 0.01
 uniform float u_x_motion_y = 0.0; // @label X Motion Imaginary | @min -20.0 | @max 20.0 | @sens 0.01
 
-uniform float u_c_real = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_real = 0.43; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_c_imag = 0.0; // @label C Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_c_motion_x = 0.0; // @label C Motion Real | @min -20.0 | @max 20.0 | @sens 0.01
 uniform float u_c_motion_y = 0.0; // @label C Motion Imaginary | @min -20.0 | @max 20.0 | @sens 0.01
 
 uniform float u_power_strength = 1.0; // @label Power Strength | @min -30.0 | @max 30.0 | @sens 0.01
 uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 13.0 | @sens 0.01
-uniform float u_iterations = 12.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
+uniform float u_iterations = 5.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
 uniform float u_escape = 50.0; // @label Escape | @min 2.0 | @max 500.0 | @sens 1.0
 
 uniform float u_color_field = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0
@@ -1162,7 +1373,7 @@ uniform float u_a_x = 1.0; // @label A Real | @min -100.0 | @max 100.0 | @sens 0
 uniform float u_a_y = 0.0; // @label A Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_b_x = 0.0; // @label B Real | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_b_y = 0.0; // @label B Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
-uniform float u_c_x = 0.0; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
+uniform float u_c_x = 0.1; // @label C Real | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_c_y = 0.0; // @label C Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_d_x = 1.0; // @label D Real | @min -100.0 | @max 100.0 | @sens 0.01
 uniform float u_d_y = 0.0; // @label D Imaginary | @min -100.0 | @max 100.0 | @sens 0.01
@@ -1252,12 +1463,12 @@ vec4 fx_complex_mobius(vec2 uv) {
 
 
 const SRC_COMPLEX_TANGENT: String ="""
-uniform float u_zoom = 1.5; // @label Zoom | @min 0.002 | @max 80.000 | @sens 0.020
+uniform float u_zoom = 1.5; // @label Zoom | @min 0.002 | @max 180.000 | @sens 0.020
 uniform float u_pan_x = 0.0; // @label Pan X | @min -040.0 | @max 40.0 | @sens 0.01
 uniform float u_pan_y = 0.0; // @label Pan Y | @min -40.0 | @max 40.0 | @sens 0.01
 
-uniform float u_c_x = 0.0; // @label C Real | @min -30.0 | @max 30.0 | @sens 0.01
-uniform float u_c_y = 0.0; // @label C Imaginary | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_c_x = 1.0; // @label C Real | @min -30.0 | @max 30.0 | @sens 0.01
+uniform float u_c_y = 0.5; // @label C Imaginary | @min -30.0 | @max 30.0 | @sens 0.01
 uniform float u_c_motion_x = 0.0; // @label C Motion X | @min -10.0 | @max 10.0 | @sens 0.01
 uniform float u_c_motion_y = 0.0; // @label C Motion Y | @min -10.0 | @max 10.0 | @sens 0.01
 
@@ -1344,7 +1555,7 @@ vec4 fx_complex_tangent(vec2 uv) {
 
 
 const SRC_COMPLEX_LOG_LAB: String = """
-uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 80.0 | @sens 0.02
+uniform float u_zoom = 1.0; // @label Zoom | @min 0.002 | @max 200.0 | @sens 0.02
 uniform float u_pan_x = 0.0; // @label Pan X | @min -300.0 | @max 300.0 | @sens 0.01
 uniform float u_pan_y = 0.0; // @label Pan Y | @min -300.0 | @max 300.0 | @sens 0.01
 
@@ -1354,11 +1565,11 @@ uniform float u_c_motion_x = 0.0; // @label C Motion X | @min -100.0 | @max 100.
 uniform float u_c_motion_y = 0.0; // @label C Motion Y | @min -100.0 | @max 100.0 | @sens 0.01
 
 uniform float u_log_scale = 1.0; // @label Log Strength | @min 0.001 | @max 13.00 | @sens 0.01
-uniform float u_feedback = 1.0; // @label Feedback | @min 0.0 | @max 20.00 | @sens 0.01
+uniform float u_feedback = 2.05; // @label Feedback | @min 0.0 | @max 20.00 | @sens 0.01
 uniform float u_iterations = 24.0; // @label Iterations | @min 1.0 | @max 60.0 | @sens 1.0
 uniform float u_escape = 20.0; // @label Escape | @min 2.0 | @max 100.0 | @sens 1.0
 
-uniform float u_color_mode = 0.0; // @label Color Field (0=Iteration, 1=Magnitude, 2=Phase, 3=Real, 4=Imaginary) | @min 0.0 | @max 4.0 | @sens 1.0 | @is_style
+uniform float u_color_mode = 0.0; // @label Color Field | @min 0.0 | @max 4.0 | @sens 1.0 | @is_style
 uniform float u_color_scale = 1.0; // @label Color Scale | @min 0.05 | @max 8.0 | @sens 0.01
 uniform float u_color_cycle = 0.0; // @label Color Cycle | @min -2.0 | @max 2.0 | @sens 0.01
 
@@ -2239,7 +2450,7 @@ vec4 fx_fluid_glitch_v2(vec2 uv)
 
 
 const SRC_FLUID_GLITCH: String = """
-uniform float u_scale = 3.0; // @label Fluid Scale | @min 0.5 | @max 12.0 | @sens 0.1
+uniform float u_scale = 1.0; // @label Fluid Scale | @min 0.001 | @max 5.0 | @sens 0.1
 uniform float u_flow_speed = 0.35; // @label Flow Speed | @min -2.0 | @max 2.0 | @sens 0.01
 uniform float u_instability = 2.5; // @label Instability | @min 0.0 | @max 8.0 | @sens 0.05
 uniform float u_singularity = 0.75; // @label Singularity Strength | @min 0.0 | @max 2.0 | @sens 0.01

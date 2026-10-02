@@ -42,6 +42,12 @@ var btn_screensaver_stub: Button
 # is owned; this is just the text it shows until then.
 const ONBOARDING_TEXT: String = "Please choose an option in the 'Shader Menu'"
 
+## Applied to every menu panel's fill (System Main Menu, Tier 1 pass-select, and the shared
+## Options/Presets/Layout/Screensaver-Dev panel) -- one setting for all three, replacing what used
+## to be two separately hardcoded colors. Each panel keeps its own accent border untouched.
+var menu_panel_color: Color = Color(0.02, 0.02, 0.04, 0.75)
+
+
 
 # --- TRIPLE PASS VIEWPORT ARCHITECTURE ---
 var pass1_viewport: SubViewport
@@ -390,7 +396,7 @@ func open_select_pass_menu() -> void:
 	select_pass_overlay_panel = PanelContainer.new()
 	select_pass_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.02, 0.04, 0.75)
+	style.bg_color = menu_panel_color
 	style.set_border_width_all(2)
 	style.border_color = Color(1.0, 0.55, 0.0, 0.9)
 	style.set_corner_radius_all(8)
@@ -528,7 +534,7 @@ func _on_shader_menu_button_pressed() -> void:
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 220)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.01, 0.01, 0.75) # Distinct deep charcoal-red tint
+	style.bg_color = menu_panel_color
 	style.set_border_width_all(2)
 	style.border_color = Color(1.0, 0.2, 0.2, 0.9) # Crimson alert frame
 	style.set_corner_radius_all(6)
@@ -689,7 +695,7 @@ func _ensure_cyan_panel() -> void:
 	menu_overlay_panel = PanelContainer.new()
 	menu_overlay_panel.custom_minimum_size = Vector2(340, 260)
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.02, 0.04, 0.75)
+	style.bg_color = menu_panel_color
 	style.set_border_width_all(2)
 	style.border_color = Color(0.0, 0.85, 1.0, 0.9)
 	style.set_corner_radius_all(8)
@@ -960,6 +966,17 @@ func _process(delta: float) -> void:
 	_check_hardware_gpu_safety()
 	
 	
+	## Stores the color for the next time any panel (re)builds its own StyleBoxFlat, and also
+## live-updates whichever panel is on screen right now -- same live-preview behavior bg_color/
+## button_color already have while you're dragging the picker.
+func apply_menu_panel_color(c: Color) -> void:
+	menu_panel_color = c
+	for panel in [select_pass_overlay_panel, menu_overlay_panel]:
+		if panel != null and is_instance_valid(panel):
+			var sb: StyleBox = panel.get_theme_stylebox("panel")
+			if sb is StyleBoxFlat:
+				(sb as StyleBoxFlat).bg_color = c
+
 func _check_hardware_gpu_safety() -> void:
 	var current_vram_mb = Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1024.0 / 1024.0
 	var current_fps = Engine.get_frames_per_second()
